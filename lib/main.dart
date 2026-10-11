@@ -1,8 +1,7 @@
 import 'package:flutter/material.dart';
-import 'package:material_ui/material_ui.dart' as material_ui;
 import 'package:window_manager/window_manager.dart';
-import 'package:vetweek/pages.dart';
-import 'package:vetweek/services.dart';
+import 'package:vetweek/pages/shell.dart';
+import 'package:vetweek/services/base.dart';
 import 'package:vetweek/theme.dart';
 
 Future<void> main() async {
@@ -43,15 +42,7 @@ class VeTweekApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return AnimatedBuilder(
-      animation: Listenable.merge([
-        services.settings,
-        services.log,
-        services.system,
-        services.appx,
-        services.defender,
-        services.advertising,
-        services.widgets,
-      ]),
+      animation: services.settings,
       builder: (context, child) {
         return MaterialApp(
           title: 'VeTweek',
