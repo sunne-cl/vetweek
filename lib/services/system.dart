@@ -17,6 +17,10 @@ class SystemService extends ChangeNotifier {
   PcSpecs? _specs;
   DiskUsage? _diskC;
 
+  bool reservedBusy = false;
+  String reservedError = '';
+  String reservedMessage = '';
+
   SystemService({
     required this.shell,
     required this.log,
@@ -73,6 +77,55 @@ class SystemService extends ChangeNotifier {
       notifyListeners();
     } catch (e) {
       log.error('Ошибка чтения характеристик ПК', e.toString());
+    }
+  }
+
+  Future<void> restartExplorer() async {
+    final result = await shell.run(
+      r"$ErrorActionPreference='SilentlyContinue'; [Console]::OutputEncoding=[Text.Encoding]::UTF8; Stop-Process -Name explorer -Force -ErrorAction SilentlyContinue; Start-Sleep -Milliseconds 700; Start-Process explorer; Write-Output 'OK'",
+      timeout: const Duration(seconds: 30),
+    );
+
+    if (!result.success) {
+      throw result.errorOrOutput;
+    }
+
+    log.info('Проводник перезапущен');
+  }
+
+  Future<void> disableReservedStorage() async {
+    if (reservedBusy) {
+      return;
+    }
+
+    reservedBusy = true;
+    reservedError = '';
+    reservedMessage = '';
+    notifyListeners();
+
+    try {
+      final result = await shell.run(
+        r"$ErrorActionPreference='Stop'; [Console]::OutputEncoding=[Text.Encoding]::UTF8; DISM.exe /Online /Set-ReservedStorageState /State:Disabled; Write-Output 'OK'",
+        timeout: const Duration(minutes: 5),
+      );
+
+      if (!result.success) {
+        throw result.errorOrOutput;
+      }
+
+      reservedMessage = result.stdout.trim();
+
+      log.success(
+        'Резервируемое хранилище отключено',
+        reservedMessage,
+      );
+    } catch (e) {
+      reservedError = e.toString();
+      log.error('Не удалось отключить резервируемое хранилище', reservedError);
+      rethrow;
+    } finally {
+      reservedBusy = false;
+      notifyListeners();
     }
   }
 
@@ -1266,6 +1319,10 @@ class TweakEngine extends ChangeNotifier {
   }
 
   Future<void> _applyCommand(CommandTweak tweak) async {
+    if (tweak.id == 'explorer.arrow') {
+      await _writeEmptyIcon();
+    }
+
     final result = await shell.run(
       tweak.applyCommand,
       timeout: const Duration(seconds: 60),
@@ -1289,5 +1346,113 @@ class TweakEngine extends ChangeNotifier {
     if (!result.success) {
       throw result.errorOrOutput;
     }
+  }
+
+  Future<void> _writeEmptyIcon() async {
+    final directory = Directory(
+      '${AppPaths.baseDirectory()}${Platform.pathSeparator}VeTweek',
+    );
+
+    if (!await directory.exists()) {
+      await directory.create(recursive: true);
+    }
+
+    final bytes = <int>[
+      0x00,
+      0x00,
+      0x01,
+      0x00,
+      0x01,
+      0x00,
+      0x01,
+      0x02,
+      0x00,
+      0x00,
+      0x01,
+      0x00,
+      0x20,
+      0x00,
+      0x30,
+      0x00,
+      0x00,
+      0x00,
+      0x16,
+      0x00,
+      0x00,
+      0x00,
+      0x28,
+      0x00,
+      0x00,
+      0x00,
+      0x01,
+      0x00,
+      0x00,
+      0x00,
+      0x02,
+      0x00,
+      0x00,
+      0x00,
+      0x01,
+      0x00,
+      0x20,
+      0x00,
+      0x00,
+      0x00,
+      0x00,
+      0x00,
+      0x30,
+      0x00,
+      0x00,
+      0x00,
+      0x00,
+      0x00,
+      0x00,
+      0x00,
+      0x00,
+      0x00,
+      0x00,
+      0x00,
+      0x00,
+      0x00,
+      0x00,
+      0x00,
+      0x00,
+      0x00,
+      0x00,
+      0x00,
+      0x00,
+      0x00,
+      0x00,
+      0x00,
+      0x00,
+      0x00,
+      0x00,
+      0x00,
+      0x00,
+      0x00,
+      0x00,
+      0x00,
+      0x00,
+      0x00,
+      0x00,
+      0x00,
+      0x00,
+      0x00,
+      0x00,
+      0x00,
+      0x00,
+      0x00,
+      0x00,
+      0x00,
+      0x00,
+      0x00,
+      0x00,
+    ];
+
+    final file = File(
+      '${directory.path}${Platform.pathSeparator}empty.ico',
+    );
+
+    await file.writeAsBytes(bytes, flush: true);
   }
 }

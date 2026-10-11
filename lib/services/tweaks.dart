@@ -124,7 +124,7 @@ class AdvertisingService extends ChangeNotifier {
   final LogService log;
   final RegistryService registry;
 
-  static const List<RegistryOp> adsOps = [
+  static final List<RegistryOp> adsOps = <RegistryOp>[
     RegistryOp(
       hive: Hive.hkcu,
       key: r'Software\Microsoft\Windows\CurrentVersion\ContentDeliveryManager',
@@ -591,6 +591,57 @@ class TweakCatalog {
     tweaks.add(
       RegistryTweakWrapper(
         RegistryTweak(
+          id: 'privacy.autoprovisioning',
+          title: 'Запретить автоустановку рекламных приложений',
+          description:
+              'Мешает Windows автоматически ставить рекомендованные приложения после обновлений.',
+          category: TweakCategory.privacy,
+          requiresAdmin: false,
+          reversible: true,
+          ops: [
+            RegistryOp(
+              hive: Hive.hkcu,
+              key:
+                  r'Software\Microsoft\Windows\CurrentVersion\ContentDeliveryManager',
+              valueName: 'SilentInstalledAppsEnabled',
+              type: RegValueType.dword,
+              applyValue: 0,
+              applyAction: RegAction.setValue,
+              revertAction: RegAction.deleteValue,
+            ),
+          ],
+        ),
+      ),
+    );
+
+    tweaks.add(
+      RegistryTweakWrapper(
+        RegistryTweak(
+          id: 'privacy.input.tipc',
+          title: 'Отключить сбор данных рукописного ввода',
+          description:
+              'Выключает отправку данных о вводе через TIPC.',
+          category: TweakCategory.privacy,
+          requiresAdmin: false,
+          reversible: true,
+          ops: [
+            RegistryOp(
+              hive: Hive.hkcu,
+              key: r'Software\Microsoft\Input\TIPC',
+              valueName: 'Enabled',
+              type: RegValueType.dword,
+              applyValue: 0,
+              applyAction: RegAction.setValue,
+              revertAction: RegAction.deleteValue,
+            ),
+          ],
+        ),
+      ),
+    );
+
+    tweaks.add(
+      RegistryTweakWrapper(
+        RegistryTweak(
           id: 'explorer.classicmenu',
           title: 'Классическое контекстное меню',
           description:
@@ -698,6 +749,30 @@ class TweakCatalog {
     );
 
     tweaks.add(
+      CommandTweakWrapper(
+        CommandTweak(
+          id: 'explorer.arrow',
+          title: 'Убрать стрелки с ярлыков',
+          description:
+              'Создает прозрачный empty.ico и назначает его для системных стрелок ярлыков.',
+          category: TweakCategory.explorer,
+          requiresAdmin: true,
+          reversible: true,
+          warning:
+              'После применения нажми «Перезапустить Проводник» или перезагрузи ПК. Для отката удали параметр 29 из Shell Icons.',
+          applyCommand:
+              r"$ErrorActionPreference='Stop'; [Console]::OutputEncoding=[Text.Encoding]::UTF8; $p=Join-Path (Join-Path $env:APPDATA 'VeTweek') 'empty.ico'; $k=[Microsoft.Win32.Registry]::LocalMachine.CreateSubKey('SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\Shell Icons'); $k.SetValue('29', ($p + ',0'), [Microsoft.Win32.RegistryValueKind]::String); $k.Close(); Write-Output 'OK'",
+          revertCommand:
+              r"$ErrorActionPreference='Stop'; [Console]::OutputEncoding=[Text.Encoding]::UTF8; $k=[Microsoft.Win32.Registry]::LocalMachine.OpenSubKey('SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\Shell Icons',$true); if($k){ $k.DeleteValue('29',$false); $k.Close() }; Write-Output 'OK'",
+          statusCommand:
+              r"$ErrorActionPreference='Stop'; [Console]::OutputEncoding=[Text.Encoding]::UTF8; $p=Join-Path (Join-Path $env:APPDATA 'VeTweek') 'empty.ico'; $k=[Microsoft.Win32.Registry]::LocalMachine.OpenSubKey('SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\Shell Icons'); if($k){ $v=[string]$k.GetValue('29',$null); $k.Close(); if($v -eq ($p + ',0') -and (Test-Path $p)){ 'APPLIED' } else { 'NOT' } } else { 'NOT' }",
+          appliedToken: 'APPLIED',
+          notAppliedToken: 'NOT',
+        ),
+      ),
+    );
+
+    tweaks.add(
       RegistryTweakWrapper(
         RegistryTweak(
           id: 'system.onedrive',
@@ -727,7 +802,6 @@ class TweakCatalog {
               applyValue: null,
               applyAction: RegAction.deleteValue,
               revertAction: RegAction.setValue,
-              revertValue: '',
             ),
           ],
           applyShell:
@@ -811,6 +885,114 @@ class TweakCatalog {
     tweaks.add(
       RegistryTweakWrapper(
         RegistryTweak(
+          id: 'system.smartscreen',
+          title: 'Отключить SmartScreen',
+          description:
+              'Отключает проверку приложений и файлов через Windows SmartScreen.',
+          category: TweakCategory.system,
+          requiresAdmin: true,
+          reversible: true,
+          warning:
+              'ТЕСТОВАЯ ФУНКЦИЯ. ОПАСНО. SmartScreen перестанет блокировать непроверенные приложения и файлы из интернета. Это заметно снижает защиту системы. Используй только если полностью понимаешь риск и у тебя есть альтернативная защита.',
+          ops: [
+            RegistryOp(
+              hive: Hive.hklm,
+              key: r'SOFTWARE\Policies\Microsoft\Windows\System',
+              valueName: 'EnableSmartScreen',
+              type: RegValueType.dword,
+              applyValue: 0,
+              applyAction: RegAction.setValue,
+              revertAction: RegAction.deleteValue,
+            ),
+          ],
+        ),
+      ),
+    );
+
+    tweaks.add(
+      RegistryTweakWrapper(
+        RegistryTweak(
+          id: 'system.copilot',
+          title: 'Отключить Windows Copilot',
+          description:
+              'Выключает ИИ-помощник Copilot через политику Windows.',
+          category: TweakCategory.system,
+          requiresAdmin: false,
+          reversible: true,
+          warning:
+              'Работает не во всех редакциях и сборках Windows 11.',
+          ops: [
+            RegistryOp(
+              hive: Hive.hkcu,
+              key: r'Software\Policies\Microsoft\Windows\WindowsCopilot',
+              valueName: 'TurnOffWindowsCopilot',
+              type: RegValueType.dword,
+              applyValue: 1,
+              applyAction: RegAction.setValue,
+              revertAction: RegAction.deleteValue,
+            ),
+          ],
+        ),
+      ),
+    );
+
+    tweaks.add(
+      RegistryTweakWrapper(
+        RegistryTweak(
+          id: 'system.notifications.toasts',
+          title: 'Разрешить всплывающие уведомления',
+          description:
+              'Включает глобальные toast-уведомления, если они были отключены системными ограничениями.',
+          category: TweakCategory.system,
+          requiresAdmin: false,
+          reversible: true,
+          warning:
+              'Это не полноценное отключение Focus Assist, а управление всплывающими уведомлениями через указанный параметр реестра.',
+          ops: [
+            RegistryOp(
+              hive: Hive.hkcu,
+              key:
+                  r'Software\Microsoft\Windows\CurrentVersion\Notifications\Settings',
+              valueName: 'NOC_GLOBAL_SETTING_TOASTS_ENABLED',
+              type: RegValueType.dword,
+              applyValue: 1,
+              applyAction: RegAction.setValue,
+              revertAction: RegAction.deleteValue,
+            ),
+          ],
+        ),
+      ),
+    );
+
+    tweaks.add(
+      RegistryTweakWrapper(
+        RegistryTweak(
+          id: 'system.deliveryoptimization',
+          title: 'Отключить раздачу обновлений WUDO',
+          description:
+              'Запрещает использовать твой интернет-канал для раздачи обновлений другим пользователям.',
+          category: TweakCategory.system,
+          requiresAdmin: true,
+          reversible: true,
+          ops: [
+            RegistryOp(
+              hive: Hive.hklm,
+              key:
+                  r'SOFTWARE\Microsoft\Windows\CurrentVersion\DeliveryOptimization\Config',
+              valueName: 'DODownloadMode',
+              type: RegValueType.dword,
+              applyValue: 0,
+              applyAction: RegAction.setValue,
+              revertAction: RegAction.deleteValue,
+            ),
+          ],
+        ),
+      ),
+    );
+
+    tweaks.add(
+      RegistryTweakWrapper(
+        RegistryTweak(
           id: 'performance.gamebar',
           title: 'Отключить Xbox Game Bar и DVR',
           description:
@@ -841,6 +1023,42 @@ class TweakCatalog {
               hive: Hive.hklm,
               key: r'SOFTWARE\Policies\Microsoft\Windows\GameDVR',
               valueName: 'AllowGameDVR',
+              type: RegValueType.dword,
+              applyValue: 0,
+              applyAction: RegAction.setValue,
+              revertAction: RegAction.deleteValue,
+            ),
+          ],
+        ),
+      ),
+    );
+
+    tweaks.add(
+      RegistryTweakWrapper(
+        RegistryTweak(
+          id: 'performance.gamebar.fse',
+          title: 'Отключить Game Bar Nexus и стартовую панель',
+          description:
+              'Глобальный рубильник для игрового поведения Windows. Отключает UseNexusForGameBarEnabled и ShowStartPanel.',
+          category: TweakCategory.performance,
+          requiresAdmin: false,
+          reversible: true,
+          warning:
+              'Может повлиять на поведение Game Bar и оптимизаций оконных игр. После применения перезапусти игры или выйди из системы.',
+          ops: [
+            RegistryOp(
+              hive: Hive.hkcu,
+              key: r'Software\Microsoft\GameBar',
+              valueName: 'UseNexusForGameBarEnabled',
+              type: RegValueType.dword,
+              applyValue: 0,
+              applyAction: RegAction.setValue,
+              revertAction: RegAction.deleteValue,
+            ),
+            RegistryOp(
+              hive: Hive.hkcu,
+              key: r'Software\Microsoft\GameBar',
+              valueName: 'ShowStartPanel',
               type: RegValueType.dword,
               applyValue: 0,
               applyAction: RegAction.setValue,
@@ -901,6 +1119,260 @@ class TweakCatalog {
               revertAction: RegAction.setValue,
               revertValue: '510',
               missingCountsAsReverted: true,
+            ),
+          ],
+        ),
+      ),
+    );
+
+    tweaks.add(
+      RegistryTweakWrapper(
+        RegistryTweak(
+          id: 'performance.mouse.acceleration',
+          title: 'Отключить акселерацию мыши',
+          description:
+              'Убирает программное ускорение курсора. Прицел движется пропорционально движению мыши.',
+          category: TweakCategory.performance,
+          requiresAdmin: false,
+          reversible: true,
+          warning:
+              'После применения может потребоваться выход из системы или перезапуск Проводника.',
+          ops: [
+            RegistryOp(
+              hive: Hive.hkcu,
+              key: r'Control Panel\Mouse',
+              valueName: 'MouseSpeed',
+              type: RegValueType.string,
+              applyValue: '0',
+              applyAction: RegAction.setValue,
+              revertAction: RegAction.deleteValue,
+            ),
+            RegistryOp(
+              hive: Hive.hkcu,
+              key: r'Control Panel\Mouse',
+              valueName: 'MouseThreshold1',
+              type: RegValueType.string,
+              applyValue: '0',
+              applyAction: RegAction.setValue,
+              revertAction: RegAction.deleteValue,
+            ),
+            RegistryOp(
+              hive: Hive.hkcu,
+              key: r'Control Panel\Mouse',
+              valueName: 'MouseThreshold2',
+              type: RegValueType.string,
+              applyValue: '0',
+              applyAction: RegAction.setValue,
+              revertAction: RegAction.deleteValue,
+            ),
+          ],
+        ),
+      ),
+    );
+
+    tweaks.add(
+      RegistryTweakWrapper(
+        RegistryTweak(
+          id: 'performance.ui.instantresponse',
+          title: 'Мгновенный отклик интерфейса',
+          description:
+              'Убирает задержку контекстных меню и ускоряет завершение зависших приложений.',
+          category: TweakCategory.performance,
+          requiresAdmin: false,
+          reversible: true,
+          warning:
+              'Windows будет быстрее убивать зависшие процессы. Используй осторожно, если часто работаешь с тяжелыми приложениями.',
+          ops: [
+            RegistryOp(
+              hive: Hive.hkcu,
+              key: r'Control Panel\Desktop',
+              valueName: 'MenuShowDelay',
+              type: RegValueType.string,
+              applyValue: '0',
+              applyAction: RegAction.setValue,
+              revertAction: RegAction.deleteValue,
+            ),
+            RegistryOp(
+              hive: Hive.hkcu,
+              key: r'Control Panel\Desktop',
+              valueName: 'HungAppTimeout',
+              type: RegValueType.string,
+              applyValue: '2000',
+              applyAction: RegAction.setValue,
+              revertAction: RegAction.deleteValue,
+            ),
+            RegistryOp(
+              hive: Hive.hkcu,
+              key: r'Control Panel\Desktop',
+              valueName: 'WaitToKillAppTimeout',
+              type: RegValueType.string,
+              applyValue: '2000',
+              applyAction: RegAction.setValue,
+              revertAction: RegAction.deleteValue,
+            ),
+          ],
+        ),
+      ),
+    );
+
+    tweaks.add(
+      RegistryTweakWrapper(
+        RegistryTweak(
+          id: 'performance.qos.limit',
+          title: 'Снять лимит QoS 20%',
+          description:
+              'Отключает резервирование полосы пропускания Windows для системных задач.',
+          category: TweakCategory.performance,
+          requiresAdmin: true,
+          reversible: true,
+          warning:
+              'Влияет на сетевой приоритет системы. Обычно безопасно, но меняет поведение QoS Packet Scheduler.',
+          ops: [
+            RegistryOp(
+              hive: Hive.hklm,
+              key: r'SOFTWARE\Policies\Microsoft\Windows\Psched',
+              valueName: 'NonBestEffortLimit',
+              type: RegValueType.dword,
+              applyValue: 0,
+              applyAction: RegAction.setValue,
+              revertAction: RegAction.deleteValue,
+            ),
+          ],
+        ),
+      ),
+    );
+
+    tweaks.add(
+      RegistryTweakWrapper(
+        RegistryTweak(
+          id: 'performance.fullscreen.optimizations',
+          title: 'Отключить оптимизацию во весь экран',
+          description:
+              'Глобальный твик для игр. Может снизить инпут-лаг в полноэкранных приложениях.',
+          category: TweakCategory.performance,
+          requiresAdmin: false,
+          reversible: true,
+          warning:
+              'Глобальное поведение может отличаться в зависимости от игры, драйвера и версии Windows.',
+          ops: [
+            RegistryOp(
+              hive: Hive.hkcu,
+              key: r'System\GameConfigStore',
+              valueName: 'GameDVR_FSEBehavior',
+              type: RegValueType.dword,
+              applyValue: 2,
+              applyAction: RegAction.setValue,
+              revertAction: RegAction.deleteValue,
+            ),
+          ],
+        ),
+      ),
+    );
+
+    tweaks.add(
+      RegistryTweakWrapper(
+        RegistryTweak(
+          id: 'performance.powerthrottling',
+          title: 'Отключить Power Throttling',
+          description:
+              'Мешает Windows принудительно занижать приоритет фоновых приложений, что иногда помогает в играх и стриминге.',
+          category: TweakCategory.performance,
+          requiresAdmin: true,
+          reversible: true,
+          warning:
+              'Может увеличить фоновое энергопотребление. Не рекомендуется для ноутбуков от батареи.',
+          ops: [
+            RegistryOp(
+              hive: Hive.hklm,
+              key: r'SYSTEM\CurrentControlSet\Control\Power\PowerThrottling',
+              valueName: 'PowerThrottlingOff',
+              type: RegValueType.dword,
+              applyValue: 1,
+              applyAction: RegAction.setValue,
+              revertAction: RegAction.deleteValue,
+            ),
+          ],
+        ),
+      ),
+    );
+
+    tweaks.add(
+      RegistryTweakWrapper(
+        RegistryTweak(
+          id: 'performance.cpu.parking.visible',
+          title: 'Показать настройку парковки ядер',
+          description:
+              'Раскрывает скрытый параметр электропитания для управления парковкой ядер процессора.',
+          category: TweakCategory.performance,
+          requiresAdmin: true,
+          reversible: true,
+          warning:
+              'Твик только показывает скрытую настройку в панели электропитания. Само значение парковки нужно выставлять вручную после применения.',
+          ops: [
+            RegistryOp(
+              hive: Hive.hklm,
+              key:
+                  r'SYSTEM\CurrentControlSet\Control\Power\PowerSettings\54533251-82be-4824-96c1-47b60b740d00\0cc5b647-c1df-4637-891a-dec35c318583',
+              valueName: 'Attributes',
+              type: RegValueType.dword,
+              applyValue: 0,
+              applyAction: RegAction.setValue,
+              revertAction: RegAction.deleteValue,
+            ),
+          ],
+        ),
+      ),
+    );
+
+    tweaks.add(
+      RegistryTweakWrapper(
+        RegistryTweak(
+          id: 'performance.cpu.boost.visible',
+          title: 'Показать настройку агрессивности буста',
+          description:
+              'Раскрывает скрытый параметр электропитания для управления режимом буста процессора.',
+          category: TweakCategory.performance,
+          requiresAdmin: true,
+          reversible: true,
+          warning:
+              'Твик только показывает скрытую настройку в панели электропитания. Значение буста нужно настраивать вручную после применения.',
+          ops: [
+            RegistryOp(
+              hive: Hive.hklm,
+              key:
+                  r'SYSTEM\CurrentControlSet\Control\Power\PowerSettings\54533251-82be-4824-96c1-47b60b740d00\be337238-0d82-4146-a960-4f3749d470c7',
+              valueName: 'Attributes',
+              type: RegValueType.dword,
+              applyValue: 2,
+              applyAction: RegAction.setValue,
+              revertAction: RegAction.deleteValue,
+            ),
+          ],
+        ),
+      ),
+    );
+
+    tweaks.add(
+      RegistryTweakWrapper(
+        RegistryTweak(
+          id: 'performance.dwm.flipmodel',
+          title: 'Оптимизация flip-модели для оконных приложений',
+          description:
+              'Применяет DirectXUserGlobalKey для оконных приложений и может снизить задержку DWM.',
+          category: TweakCategory.performance,
+          requiresAdmin: false,
+          reversible: true,
+          warning:
+              'ТЕСТОВАЯ ФУНКЦИЯ. Может повлиять на совместимость старых DirectX-приложений, вызвать артефакты или изменить поведение окон. При проблемах сразу откати твик.',
+          ops: [
+            RegistryOp(
+              hive: Hive.hkcu,
+              key: r'Software\Microsoft\DirectX\UserGpuPreferences',
+              valueName: 'DirectXUserGlobalKey',
+              type: RegValueType.dword,
+              applyValue: 1,
+              applyAction: RegAction.setValue,
+              revertAction: RegAction.deleteValue,
             ),
           ],
         ),

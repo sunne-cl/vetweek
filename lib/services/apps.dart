@@ -76,7 +76,8 @@ class AppxService extends ChangeNotifier {
         .toList();
   }
 
-  int get selectedCount => _packages.where((package) => package.selected).length;
+  int get selectedCount =>
+      _packages.where((package) => package.selected).length;
 
   void setQuery(String value) {
     _query = value;
@@ -205,12 +206,10 @@ class AppxService extends ChangeNotifier {
         await _removePackage(package);
         _packages.remove(package);
         success++;
-
         log.success('Приложение удалено', package.packageFullName);
       } catch (e) {
         failed++;
         package.selected = true;
-
         log.error(
           'Не удалось удалить приложение',
           '${package.packageFullName}: $e',
@@ -235,8 +234,8 @@ class AppxService extends ChangeNotifier {
 
     final command =
         r"$ErrorActionPreference='Stop'; [Console]::OutputEncoding=[Text.Encoding]::UTF8; try { Get-AppxPackage -Name '" +
-            escaped +
-            r"' | Remove-AppxPackage; Write-Output 'OK' } catch { [Console]::Error.WriteLine($_.Exception.Message); exit 1 }";
+        escaped +
+        r"' | Remove-AppxPackage; Write-Output 'OK' } catch { [Console]::Error.WriteLine($_.Exception.Message); exit 1 }";
 
     final result = await shell.run(command);
 
@@ -324,12 +323,14 @@ class StartupService extends ChangeNotifier {
       }
 
       final buffer = StringBuffer();
+
       buffer.write(
         r"$ErrorActionPreference='Stop'; [Console]::OutputEncoding=[Text.Encoding]::UTF8; $res=New-Object System.Collections.Generic.List[object]; $paths=@(",
       );
 
       for (var i = 0; i < paths.length; i++) {
         buffer.write(psQuote(paths[i]));
+
         if (i < paths.length - 1) {
           buffer.write(',');
         }
@@ -378,7 +379,9 @@ class StartupService extends ChangeNotifier {
       }
 
       log.info(
-        extended ? 'Расширенная автозагрузка загружена' : 'Автозагрузка загружена',
+        extended
+            ? 'Расширенная автозагрузка загружена'
+            : 'Автозагрузка загружена',
         'Элементов: ${parsed.length}',
       );
     } catch (e) {
@@ -392,6 +395,7 @@ class StartupService extends ChangeNotifier {
 
   RegistryOp _opFor(StartupEntry entry) {
     final hive = entry.hive == 'HKLM' ? Hive.hklm : Hive.hkcu;
+
     var key = entry.key;
 
     if (key.startsWith(r'HKCU:\')) {
@@ -421,7 +425,11 @@ class StartupService extends ChangeNotifier {
     entries.removeWhere((e) => e.uniqueId == entry.uniqueId);
     extendedEntries.removeWhere((e) => e.uniqueId == entry.uniqueId);
 
-    log.warning('Запись автозагрузки удалена', '${entry.valueName}: ${entry.valueData}');
+    log.warning(
+      'Запись автозагрузки удалена',
+      '${entry.valueName}: ${entry.valueData}',
+    );
+
     notifyListeners();
   }
 
@@ -559,7 +567,8 @@ class DevService extends ChangeNotifier {
       id: 'wsl',
       displayName: 'Windows Subsystem for Linux',
       featureName: 'Microsoft-Windows-Subsystem-Linux',
-      warning: 'Требует перезагрузки. Может потребоваться включение виртуализации в BIOS/UEFI.',
+      warning:
+          'Требует перезагрузки. Может потребоваться включение виртуализации в BIOS/UEFI.',
     ),
     _ComponentDef(
       id: 'vmp',
@@ -571,9 +580,17 @@ class DevService extends ChangeNotifier {
       id: 'hyperv',
       displayName: 'Hyper-V',
       featureName: 'Microsoft-Hyper-V-All',
-      warning: 'Доступен не во всех редакциях Windows. Требует перезагрузки и может конфликтовать с другими гипервизорами.',
+      warning:
+          'Доступен не во всех редакциях Windows. Требует перезагрузки и может конфликтовать с другими гипервизорами.',
     ),
   ];
+
+  static const String _policyKeyUser =
+      r'Software\Microsoft\Windows\CurrentVersion\Policies\System';
+  static const String _policyKeyMachine =
+      r'SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System';
+  static const String _taskMgrValue = 'DisableTaskMgr';
+  static const String _regEditValue = 'DisableRegistryTools';
 
   List<WindowsComponentState> components = [];
   List<PathEntry> userPath = [];
@@ -582,6 +599,25 @@ class DevService extends ChangeNotifier {
   bool loaded = false;
   bool busy = false;
   String error = '';
+
+  bool policyBusy = false;
+  String policyError = '';
+
+  bool taskMgrUserChecked = false;
+  bool taskMgrUserEnabled = true;
+  String taskMgrUserError = '';
+
+  bool taskMgrMachineChecked = false;
+  bool taskMgrMachineEnabled = true;
+  String taskMgrMachineError = '';
+
+  bool regEditUserChecked = false;
+  bool regEditUserEnabled = true;
+  String regEditUserError = '';
+
+  bool regEditMachineChecked = false;
+  bool regEditMachineEnabled = true;
+  String regEditMachineError = '';
 
   DevService({
     required this.shell,
@@ -596,6 +632,8 @@ class DevService extends ChangeNotifier {
     await refreshComponents();
     await refreshPaths();
     await refreshDevMode();
+    await refreshPolicies();
+
     loaded = true;
     notifyListeners();
   }
@@ -623,16 +661,19 @@ class DevService extends ChangeNotifier {
               ),
             )
             .toList();
+
         return;
       }
 
       final buffer = StringBuffer();
+
       buffer.write(
         r"$ErrorActionPreference='Stop'; [Console]::OutputEncoding=[Text.Encoding]::UTF8; $res=New-Object System.Collections.Generic.List[object]; $features=@(",
       );
 
       for (var i = 0; i < _componentDefs.length; i++) {
         buffer.write(psQuote(_componentDefs[i].featureName));
+
         if (i < _componentDefs.length - 1) {
           buffer.write(',');
         }
@@ -706,6 +747,7 @@ class DevService extends ChangeNotifier {
 
     try {
       final def = _componentDefs.firstWhere((d) => d.featureName == featureName);
+
       final current = components.firstWhere(
         (c) => c.featureName == featureName,
         orElse: () => WindowsComponentState(
@@ -721,6 +763,7 @@ class DevService extends ChangeNotifier {
       _backupDev('component.${def.id}', current.state);
 
       final action = enable ? 'Enable' : 'Disable';
+
       final command =
           "\$ErrorActionPreference='Stop'; [Console]::OutputEncoding=[Text.Encoding]::UTF8; $action-WindowsOptionalFeature -Online -FeatureName ${psQuote(featureName)} -All -NoRestart; Write-Output 'OK'";
 
@@ -764,6 +807,7 @@ class DevService extends ChangeNotifier {
       }
 
       final data = jsonDecode(result.stdout.trim()) as Map<String, dynamic>;
+
       final user = (data['user'] ?? '').toString();
       final machine = (data['machine'] ?? '').toString();
 
@@ -789,7 +833,8 @@ class DevService extends ChangeNotifier {
         .map(
           (e) => PathEntry(
             value: e,
-            exists: FileSystemEntity.typeSync(e) != FileSystemEntityType.notFound,
+            exists:
+                FileSystemEntity.typeSync(e) != FileSystemEntityType.notFound,
           ),
         )
         .toList();
@@ -802,13 +847,16 @@ class DevService extends ChangeNotifier {
       return;
     }
 
-    final list = target == 'Machine' ? List<String>.from(systemPath.map((e) => e.value)) : List<String>.from(userPath.map((e) => e.value));
+    final list = target == 'Machine'
+        ? List<String>.from(systemPath.map((e) => e.value))
+        : List<String>.from(userPath.map((e) => e.value));
 
     if (list.any((e) => e.toLowerCase() == clean.toLowerCase())) {
       return;
     }
 
     list.add(clean);
+
     await setPath(target, list.join(';'));
   }
 
@@ -822,6 +870,7 @@ class DevService extends ChangeNotifier {
     }
 
     list.removeAt(index);
+
     await setPath(target, list.join(';'));
   }
 
@@ -860,7 +909,12 @@ class DevService extends ChangeNotifier {
     notifyListeners();
 
     try {
-      _backupDev('path.$target', target == 'Machine' ? systemPath.map((e) => e.value).join(';') : userPath.map((e) => e.value).join(';'));
+      _backupDev(
+        'path.$target',
+        target == 'Machine'
+            ? systemPath.map((e) => e.value).join(';')
+            : userPath.map((e) => e.value).join(';'),
+      );
 
       final command =
           "\$ErrorActionPreference='Stop'; [Console]::OutputEncoding=[Text.Encoding]::UTF8; [Environment]::SetEnvironmentVariable('Path', ${psQuote(value)}, ${psQuote(target == 'Machine' ? 'Machine' : 'User')}); Write-Output 'OK'";
@@ -875,6 +929,7 @@ class DevService extends ChangeNotifier {
       }
 
       log.success('Переменная PATH обновлена', target);
+
       await refreshPaths();
       await state.save();
     } catch (e) {
@@ -901,7 +956,9 @@ class DevService extends ChangeNotifier {
       );
 
       final reads = await registry.readMany([op]);
+
       devModeEnabled = reads.first.value == '1';
+
       notifyListeners();
     } catch (e) {
       error = e.toString();
@@ -935,7 +992,11 @@ class DevService extends ChangeNotifier {
       );
 
       final reads = await registry.readMany([op]);
-      _backupDev('devmode', reads.first.value.isEmpty ? '__MISSING__' : reads.first.value);
+
+      _backupDev(
+        'devmode',
+        reads.first.value.isEmpty ? '__MISSING__' : reads.first.value,
+      );
 
       await registry.write(op, enable ? 1 : 0);
 
@@ -963,6 +1024,328 @@ class DevService extends ChangeNotifier {
     );
   }
 
+  Future<void> refreshPolicies() async {
+    if (policyBusy) {
+      return;
+    }
+
+    policyBusy = true;
+    policyError = '';
+    notifyListeners();
+
+    try {
+      await _refreshTaskMgrUser();
+      await _refreshTaskMgrMachine();
+      await _refreshRegEditUser();
+      await _refreshRegEditMachine();
+    } catch (e) {
+      policyError = e.toString();
+    } finally {
+      policyBusy = false;
+      notifyListeners();
+    }
+  }
+
+  Future<void> setTaskManager({
+    required bool enable,
+    required bool machine,
+  }) async {
+    final hive = machine ? Hive.hklm : Hive.hkcu;
+    final backupKey =
+        machine ? 'policy.taskmgr.machine' : 'policy.taskmgr.user';
+
+    try {
+      await _setPolicy(
+        hive: hive,
+        valueName: _taskMgrValue,
+        enable: enable,
+        backupKey: backupKey,
+        displayName: 'Диспетчер задач',
+        scope: machine ? 'Вся система' : 'Текущий пользователь',
+        refreshAfter: machine ? _refreshTaskMgrMachine : _refreshTaskMgrUser,
+      );
+    } catch (e) {
+      if (machine) {
+        taskMgrMachineError = e.toString();
+      } else {
+        taskMgrUserError = e.toString();
+      }
+
+      rethrow;
+    }
+  }
+
+  Future<void> setRegistryEditor({
+    required bool enable,
+    required bool machine,
+  }) async {
+    final hive = machine ? Hive.hklm : Hive.hkcu;
+    final backupKey =
+        machine ? 'policy.regedit.machine' : 'policy.regedit.user';
+
+    try {
+      await _setPolicy(
+        hive: hive,
+        valueName: _regEditValue,
+        enable: enable,
+        backupKey: backupKey,
+        displayName: 'Редактор реестра',
+        scope: machine ? 'Вся система' : 'Текущий пользователь',
+        refreshAfter: machine ? _refreshRegEditMachine : _refreshRegEditUser,
+      );
+    } catch (e) {
+      if (machine) {
+        regEditMachineError = e.toString();
+      } else {
+        regEditUserError = e.toString();
+      }
+
+      rethrow;
+    }
+  }
+
+  String _policyKey(Hive hive) {
+    if (hive == Hive.hklm) {
+      return _policyKeyMachine;
+    }
+
+    return _policyKeyUser;
+  }
+
+  RegistryOp _policyReadOp(Hive hive, String valueName) {
+    return RegistryOp(
+      hive: hive,
+      key: _policyKey(hive),
+      valueName: valueName,
+      type: RegValueType.dword,
+      applyValue: null,
+      applyAction: RegAction.setValue,
+      revertAction: RegAction.deleteValue,
+    );
+  }
+
+  RegistryOp _policyDisableOp(Hive hive, String valueName) {
+    return RegistryOp(
+      hive: hive,
+      key: _policyKey(hive),
+      valueName: valueName,
+      type: RegValueType.dword,
+      applyValue: 1,
+      applyAction: RegAction.setValue,
+      revertAction: RegAction.deleteValue,
+    );
+  }
+
+  RegistryOp _policyEnableOp(Hive hive, String valueName) {
+    return RegistryOp(
+      hive: hive,
+      key: _policyKey(hive),
+      valueName: valueName,
+      type: RegValueType.dword,
+      applyValue: null,
+      applyAction: RegAction.deleteValue,
+      revertAction: RegAction.setValue,
+    );
+  }
+
+  RegistryOp _policyWriteOp(Hive hive, String valueName, Object? value) {
+    return RegistryOp(
+      hive: hive,
+      key: _policyKey(hive),
+      valueName: valueName,
+      type: RegValueType.dword,
+      applyValue: value,
+      applyAction: RegAction.setValue,
+      revertAction: RegAction.deleteValue,
+    );
+  }
+
+  Future<String> _readPolicyRaw(Hive hive, String valueName) async {
+    final reads = await registry.readMany([_policyReadOp(hive, valueName)]);
+    final read = reads.first;
+
+    if (read.missing) {
+      return '__MISSING__';
+    }
+
+    if (read.isNull) {
+      return '__NULL__';
+    }
+
+    return read.value;
+  }
+
+  Future<bool> _readPolicyEnabled(Hive hive, String valueName) async {
+    final raw = await _readPolicyRaw(hive, valueName);
+
+    if (raw == '__MISSING__' || raw == '__NULL__') {
+      return true;
+    }
+
+    final parsed = int.tryParse(raw);
+
+    if (parsed == null) {
+      return raw != '1';
+    }
+
+    return parsed == 0;
+  }
+
+  Future<void> _refreshTaskMgrUser() async {
+    try {
+      taskMgrUserEnabled =
+          await _readPolicyEnabled(Hive.hkcu, _taskMgrValue);
+      taskMgrUserChecked = true;
+      taskMgrUserError = '';
+    } catch (e) {
+      taskMgrUserChecked = true;
+      taskMgrUserEnabled = true;
+      taskMgrUserError = e.toString();
+    }
+
+    notifyListeners();
+  }
+
+  Future<void> _refreshTaskMgrMachine() async {
+    if (!system.isAdmin) {
+      taskMgrMachineChecked = false;
+      taskMgrMachineEnabled = true;
+      taskMgrMachineError = 'Нужны права администратора';
+      notifyListeners();
+      return;
+    }
+
+    try {
+      taskMgrMachineEnabled =
+          await _readPolicyEnabled(Hive.hklm, _taskMgrValue);
+      taskMgrMachineChecked = true;
+      taskMgrMachineError = '';
+    } catch (e) {
+      taskMgrMachineChecked = true;
+      taskMgrMachineEnabled = true;
+      taskMgrMachineError = e.toString();
+    }
+
+    notifyListeners();
+  }
+
+  Future<void> _refreshRegEditUser() async {
+    try {
+      regEditUserEnabled =
+          await _readPolicyEnabled(Hive.hkcu, _regEditValue);
+      regEditUserChecked = true;
+      regEditUserError = '';
+    } catch (e) {
+      regEditUserChecked = true;
+      regEditUserEnabled = true;
+      regEditUserError = e.toString();
+    }
+
+    notifyListeners();
+  }
+
+  Future<void> _refreshRegEditMachine() async {
+    if (!system.isAdmin) {
+      regEditMachineChecked = false;
+      regEditMachineEnabled = true;
+      regEditMachineError = 'Нужны права администратора';
+      notifyListeners();
+      return;
+    }
+
+    try {
+      regEditMachineEnabled =
+          await _readPolicyEnabled(Hive.hklm, _regEditValue);
+      regEditMachineChecked = true;
+      regEditMachineError = '';
+    } catch (e) {
+      regEditMachineChecked = true;
+      regEditMachineEnabled = true;
+      regEditMachineError = e.toString();
+    }
+
+    notifyListeners();
+  }
+
+  Future<void> _setPolicy({
+    required Hive hive,
+    required String valueName,
+    required bool enable,
+    required String backupKey,
+    required String displayName,
+    required String scope,
+    required Future<void> Function() refreshAfter,
+  }) async {
+    if (policyBusy) {
+      return;
+    }
+
+    if (hive == Hive.hklm && !system.isAdmin) {
+      throw 'Для изменения системной политики нужны права администратора';
+    }
+
+    policyBusy = true;
+    policyError = '';
+    notifyListeners();
+
+    try {
+      final raw = await _readPolicyRaw(hive, valueName);
+
+      if (state.getDevBackup(backupKey) == null) {
+        state.setDevBackup(backupKey, raw);
+        await state.save();
+      }
+
+      if (enable) {
+        await registry.deleteValue(_policyEnableOp(hive, valueName));
+      } else {
+        await registry.write(_policyDisableOp(hive, valueName), 1);
+      }
+
+      log.success(
+        enable ? 'Ограничение снято' : 'Инструмент отключен',
+        '$displayName · $scope',
+      );
+
+      await refreshAfter();
+    } catch (e) {
+      policyError = e.toString();
+      rethrow;
+    } finally {
+      policyBusy = false;
+      notifyListeners();
+    }
+  }
+
+  Future<void> _rollbackPolicy(
+    String backupKey,
+    Hive hive,
+    String valueName,
+    Future<void> Function() refreshAfter,
+  ) async {
+    final backup = state.getDevBackup(backupKey);
+
+    if (backup == null) {
+      return;
+    }
+
+    if (hive == Hive.hklm && !system.isAdmin) {
+      throw 'Для отката системной политики нужны права администратора';
+    }
+
+    final raw = backup.toString();
+
+    if (raw == '__MISSING__' || raw == '__NULL__') {
+      await registry.deleteValue(_policyEnableOp(hive, valueName));
+    } else {
+      await registry.write(_policyWriteOp(hive, valueName, raw), raw);
+    }
+
+    state.removeDevBackup(backupKey);
+    await state.save();
+    await refreshAfter();
+  }
+
   void _backupDev(String key, Object? value) {
     if (state.getDevBackup(key) == null) {
       state.setDevBackup(key, value);
@@ -983,18 +1366,21 @@ class DevService extends ChangeNotifier {
 
     try {
       final pathUser = state.getDevBackup('path.User');
+
       if (pathUser != null) {
         await setPath('User', pathUser.toString());
         ok++;
       }
 
       final pathMachine = state.getDevBackup('path.Machine');
+
       if (pathMachine != null && system.isAdmin) {
         await setPath('Machine', pathMachine.toString());
         ok++;
       }
 
       final devMode = state.getDevBackup('devmode');
+
       if (devMode != null && system.isAdmin) {
         final op = RegistryOp(
           hive: Hive.hklm,
@@ -1013,6 +1399,72 @@ class DevService extends ChangeNotifier {
         }
 
         ok++;
+      }
+
+      final taskMgrUserBackup = state.getDevBackup('policy.taskmgr.user');
+
+      if (taskMgrUserBackup != null) {
+        try {
+          await _rollbackPolicy(
+            'policy.taskmgr.user',
+            Hive.hkcu,
+            _taskMgrValue,
+            _refreshTaskMgrUser,
+          );
+          ok++;
+        } catch (_) {
+          failed++;
+        }
+      }
+
+      final taskMgrMachineBackup =
+          state.getDevBackup('policy.taskmgr.machine');
+
+      if (taskMgrMachineBackup != null) {
+        try {
+          await _rollbackPolicy(
+            'policy.taskmgr.machine',
+            Hive.hklm,
+            _taskMgrValue,
+            _refreshTaskMgrMachine,
+          );
+          ok++;
+        } catch (_) {
+          failed++;
+        }
+      }
+
+      final regEditUserBackup = state.getDevBackup('policy.regedit.user');
+
+      if (regEditUserBackup != null) {
+        try {
+          await _rollbackPolicy(
+            'policy.regedit.user',
+            Hive.hkcu,
+            _regEditValue,
+            _refreshRegEditUser,
+          );
+          ok++;
+        } catch (_) {
+          failed++;
+        }
+      }
+
+      final regEditMachineBackup =
+          state.getDevBackup('policy.regedit.machine');
+
+      if (regEditMachineBackup != null) {
+        try {
+          await _rollbackPolicy(
+            'policy.regedit.machine',
+            Hive.hklm,
+            _regEditValue,
+            _refreshRegEditMachine,
+          );
+          ok++;
+        } catch (_) {
+          failed++;
+        }
       }
 
       for (final def in _componentDefs) {
@@ -1046,6 +1498,7 @@ class DevService extends ChangeNotifier {
       }
 
       final startupResult = await startup.restoreAll();
+
       log.info('Откат автозагрузки', startupResult);
 
       await state.save();

@@ -10,6 +10,14 @@ import 'package:vetweek/services/network.dart';
 import 'package:vetweek/services/system.dart';
 import 'package:vetweek/services/tweaks.dart';
 
+String _stripBom(String value) {
+  if (value.startsWith('\uFEFF')) {
+    return value.substring(1);
+  }
+
+  return value;
+}
+
 class AppPaths {
   static String baseDirectory() {
     final environment = Platform.environment;
@@ -66,8 +74,8 @@ class PowerShellService {
 
       return PowerShellResult(
         exitCode: result.exitCode,
-        stdout: result.stdout.toString(),
-        stderr: result.stderr.toString(),
+        stdout: _stripBom(result.stdout.toString()),
+        stderr: _stripBom(result.stderr.toString()),
       );
     } on TimeoutException catch (e) {
       throw 'Превышено время ожидания: $e';
@@ -193,6 +201,7 @@ class SettingsService extends ChangeNotifier {
   ThemeMode _themeMode = ThemeMode.system;
   int _seedColorValue = 0xFF0B57D0;
   bool _devModeEnabled = false;
+  bool _oled = false;
 
   ThemeMode get themeMode => _themeMode;
 
@@ -201,6 +210,8 @@ class SettingsService extends ChangeNotifier {
   Color get seedColor => Color(_seedColorValue);
 
   bool get devModeEnabled => _devModeEnabled;
+
+  bool get oled => _oled;
 
   void setThemeMode(ThemeMode value) {
     if (_themeMode == value) {
@@ -228,6 +239,16 @@ class SettingsService extends ChangeNotifier {
     }
 
     _devModeEnabled = value;
+    notifyListeners();
+    save();
+  }
+
+  void setOled(bool value) {
+    if (_oled == value) {
+      return;
+    }
+
+    _oled = value;
     notifyListeners();
     save();
   }
@@ -270,6 +291,12 @@ class SettingsService extends ChangeNotifier {
         _devModeEnabled = dev;
       }
 
+      final oled = data['oled'];
+
+      if (oled is bool) {
+        _oled = oled;
+      }
+
       notifyListeners();
     } catch (_) {
       return;
@@ -285,6 +312,7 @@ class SettingsService extends ChangeNotifier {
           'themeMode': _themeModeToString(),
           'seedColor': _seedColorValue,
           'devMode': _devModeEnabled,
+          'oled': _oled,
         }),
         flush: true,
       );
