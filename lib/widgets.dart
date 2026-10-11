@@ -1,10 +1,78 @@
 import 'package:flutter/material.dart';
 import 'package:window_manager/window_manager.dart';
 import 'package:vetweek/models.dart';
-import 'package:vetweek/services.dart';
+
+String formatBytes(int bytes) {
+  if (bytes <= 0) {
+    return '0 Б';
+  }
+
+  const units = ['Б', 'КБ', 'МБ', 'ГБ', 'ТБ'];
+  double size = bytes.toDouble();
+  int unitIndex = 0;
+
+  while (size >= 1024 && unitIndex < units.length - 1) {
+    size /= 1024;
+    unitIndex++;
+  }
+
+  final text =
+      size >= 100 ? size.toStringAsFixed(0) : size.toStringAsFixed(1);
+
+  return '$text ${units[unitIndex]}';
+}
+
+String tweakStatusLabel(TweakStatus status) {
+  switch (status) {
+    case TweakStatus.unknown:
+      return 'Не проверено';
+    case TweakStatus.applied:
+      return 'Применено';
+    case TweakStatus.notApplied:
+      return 'Не применено';
+    case TweakStatus.partial:
+      return 'Частично';
+    case TweakStatus.needsAdmin:
+      return 'Нужен админ';
+    case TweakStatus.error:
+      return 'Ошибка';
+  }
+}
+
+Color tweakStatusColor(BuildContext context, TweakStatus status) {
+  final scheme = Theme.of(context).colorScheme;
+
+  switch (status) {
+    case TweakStatus.applied:
+      return scheme.primary;
+    case TweakStatus.notApplied:
+      return scheme.onSurfaceVariant;
+    case TweakStatus.partial:
+      return scheme.tertiary;
+    case TweakStatus.needsAdmin:
+      return scheme.tertiary;
+    case TweakStatus.error:
+      return scheme.error;
+    case TweakStatus.unknown:
+      return scheme.onSurfaceVariant;
+  }
+}
+
+String categoryLabel(TweakCategory category) {
+  switch (category) {
+    case TweakCategory.privacy:
+      return 'Конфиденциальность и телеметрия';
+    case TweakCategory.explorer:
+      return 'Проводник и контекстное меню';
+    case TweakCategory.system:
+      return 'Система и очистка';
+    case TweakCategory.performance:
+      return 'Производительность и игры';
+  }
+}
 
 class TopBar extends StatelessWidget {
-  final AppServices services;
+  final bool isAdmin;
   final TextEditingController searchController;
   final bool maximized;
   final VoidCallback onMinimize;
@@ -13,7 +81,7 @@ class TopBar extends StatelessWidget {
 
   const TopBar({
     super.key,
-    required this.services,
+    required this.isAdmin,
     required this.searchController,
     required this.maximized,
     required this.onMinimize,
@@ -78,16 +146,16 @@ class TopBar extends StatelessWidget {
                   vertical: 6,
                 ),
                 decoration: BoxDecoration(
-                  color: services.system.isAdmin
+                  color: isAdmin
                       ? scheme.primaryContainer
                       : scheme.surfaceVariant,
                   borderRadius: BorderRadius.circular(999),
                 ),
                 child: Text(
-                  services.system.isAdmin ? 'Администратор' : 'Пользователь',
+                  isAdmin ? 'Администратор' : 'Пользователь',
                   style: TextStyle(
                     fontSize: 12,
-                    color: services.system.isAdmin
+                    color: isAdmin
                         ? scheme.onPrimaryContainer
                         : scheme.onSurfaceVariant,
                   ),
@@ -288,51 +356,162 @@ class StatusChip extends StatelessWidget {
   }
 }
 
-String tweakStatusLabel(TweakStatus status) {
-  switch (status) {
-    case TweakStatus.unknown:
-      return 'Не проверено';
-    case TweakStatus.applied:
-      return 'Применено';
-    case TweakStatus.notApplied:
-      return 'Не применено';
-    case TweakStatus.partial:
-      return 'Частично';
-    case TweakStatus.needsAdmin:
-      return 'Нужен админ';
-    case TweakStatus.error:
-      return 'Ошибка';
+class WarningBanner extends StatelessWidget {
+  final String text;
+
+  const WarningBanner({
+    super.key,
+    required this.text,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+
+    return Container(
+      width: double.infinity,
+      margin: const EdgeInsets.only(top: 12),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: scheme.errorContainer,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(
+            Icons.warning_amber_rounded,
+            size: 18,
+            color: scheme.onErrorContainer,
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              text,
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: scheme.onErrorContainer,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
   }
 }
 
-Color tweakStatusColor(BuildContext context, TweakStatus status) {
-  final scheme = Theme.of(context).colorScheme;
+class TweakCard extends StatelessWidget {
+  final String title;
+  final String description;
+  final String statusLabel;
+  final Color statusColor;
+  final bool busy;
+  final bool canApply;
+  final bool canRevert;
+  final bool reversible;
+  final String error;
+  final String warning;
+  final VoidCallback onApply;
+  final VoidCallback? onRevert;
+  final Future<void> Function() onRefresh;
 
-  switch (status) {
-    case TweakStatus.applied:
-      return scheme.primary;
-    case TweakStatus.notApplied:
-      return scheme.onSurfaceVariant;
-    case TweakStatus.partial:
-      return scheme.tertiary;
-    case TweakStatus.needsAdmin:
-      return scheme.tertiary;
-    case TweakStatus.error:
-      return scheme.error;
-    case TweakStatus.unknown:
-      return scheme.onSurfaceVariant;
-  }
-}
+  const TweakCard({
+    super.key,
+    required this.title,
+    required this.description,
+    required this.statusLabel,
+    required this.statusColor,
+    required this.busy,
+    required this.canApply,
+    required this.canRevert,
+    required this.reversible,
+    required this.error,
+    required this.warning,
+    required this.onApply,
+    required this.onRevert,
+    required this.onRefresh,
+  });
 
-String categoryLabel(TweakCategory category) {
-  switch (category) {
-    case TweakCategory.privacy:
-      return 'Конфиденциальность и телеметрия';
-    case TweakCategory.explorer:
-      return 'Проводник и контекстное меню';
-    case TweakCategory.system:
-      return 'Система и очистка';
-    case TweakCategory.performance:
-      return 'Производительность и игры';
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+
+    return SectionCard(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  title,
+                  style: theme.textTheme.titleMedium?.copyWith(
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+              StatusChip(
+                label: statusLabel,
+                color: statusColor,
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Text(
+            description,
+            style: theme.textTheme.bodySmall?.copyWith(
+              color: scheme.onSurfaceVariant,
+            ),
+          ),
+          if (warning.isNotEmpty)
+            WarningBanner(text: warning),
+          if (error.isNotEmpty) ...[
+            const SizedBox(height: 8),
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(
+                color: scheme.errorContainer,
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: SelectableText(
+                error,
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: scheme.onErrorContainer,
+                ),
+              ),
+            ),
+          ],
+          if (busy) ...[
+            const SizedBox(height: 12),
+            const LinearProgressIndicator(),
+          ],
+          const SizedBox(height: 14),
+          Wrap(
+            spacing: 10,
+            runSpacing: 10,
+            children: [
+              FilledButton.icon(
+                onPressed: busy || !canApply ? null : onApply,
+                icon: const Icon(Icons.check, size: 16),
+                label: const Text('Применить'),
+              ),
+              if (reversible)
+                OutlinedButton.icon(
+                  onPressed: busy || !canRevert ? null : onRevert,
+                  icon: const Icon(Icons.undo, size: 16),
+                  label: const Text('Откатить'),
+                ),
+              TextButton.icon(
+                onPressed: busy ? null : () => onRefresh(),
+                icon: const Icon(Icons.refresh, size: 16),
+                label: const Text('Обновить'),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
   }
 }

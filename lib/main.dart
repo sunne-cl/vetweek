@@ -51,10 +51,12 @@ class VeTweekApp extends StatelessWidget {
           theme: AppTheme.build(
             brightness: Brightness.light,
             seedColor: services.settings.seedColor,
+            oled: false,
           ),
           darkTheme: AppTheme.build(
             brightness: Brightness.dark,
             seedColor: services.settings.seedColor,
+            oled: services.settings.oled,
           ),
           home: AppShell(services: services),
         );
