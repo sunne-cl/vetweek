@@ -1,6 +1,6 @@
 # VeTweek
 
-VeTweek is a Windows desktop application for managing common system tweaks, privacy settings, built-in Windows components, telemetry, advertising identifiers, widgets, apps, and performance-related options.
+VeTweek is a experiment Windows desktop application for managing common system tweaks, privacy settings, built-in Windows components, telemetry, advertising identifiers, widgets, apps, and performance-related options.
 
 The application is intended for users who understand what system changes they are applying and who accept the risks associated with modifying Windows settings.
 
