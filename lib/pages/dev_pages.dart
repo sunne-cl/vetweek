@@ -536,60 +536,51 @@ class _DevPageState extends State<DevPage> {
       builder: (dialogContext) {
         final theme = Theme.of(dialogContext);
 
-        return Dialog(
+        return AlertDialog(
           backgroundColor: theme.colorScheme.surface,
           elevation: 0,
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(16),
           ),
-          child: Padding(
-            padding: const EdgeInsets.all(24),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  'Добавить путь в PATH',
-                  style: theme.textTheme.titleLarge,
-                ),
-                const SizedBox(height: 12),
-                Text(
-                  target == 'Machine' ? 'Системный PATH' : 'Пользовательский PATH',
-                  style: theme.textTheme.bodyMedium?.copyWith(
-                    color: theme.colorScheme.onSurfaceVariant,
-                  ),
-                ),
-                const SizedBox(height: 16),
-                TextField(
-                  controller: controller,
-                  autofocus: true,
-                  decoration: const InputDecoration(
-                    labelText: 'Путь',
-                    hintText: r'C:\Tools\bin',
-                  ),
-                ),
-                const SizedBox(height: 24),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.end,
-                  children: [
-                    TextButton(
-                      onPressed: () {
-                        Navigator.of(dialogContext).pop(false);
-                      },
-                      child: const Text('Отмена'),
-                    ),
-                    const SizedBox(width: 12),
-                    FilledButton(
-                      onPressed: () {
-                        Navigator.of(dialogContext).pop(true);
-                      },
-                      child: const Text('Добавить'),
-                    ),
-                  ],
-                ),
-              ],
-            ),
+          title: Text(
+            'Добавить путь в PATH',
+            style: theme.textTheme.titleLarge,
           ),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                target == 'Machine' ? 'Системный PATH' : 'Пользовательский PATH',
+                style: theme.textTheme.bodyMedium?.copyWith(
+                  color: theme.colorScheme.onSurfaceVariant,
+                ),
+              ),
+              const SizedBox(height: 16),
+              TextField(
+                controller: controller,
+                autofocus: true,
+                decoration: const InputDecoration(
+                  labelText: 'Путь',
+                  hintText: r'C:\Tools\bin',
+                ),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () {
+                Navigator.of(dialogContext).pop(false);
+              },
+              child: const Text('Отмена'),
+            ),
+            FilledButton(
+              onPressed: () {
+                Navigator.of(dialogContext).pop(true);
+              },
+              child: const Text('Добавить'),
+            ),
+          ],
         );
       },
     );

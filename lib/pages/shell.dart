@@ -286,6 +286,8 @@ class _AppShellState extends State<AppShell> with WindowListener {
       setState(() {
         _index = 2;
       });
+    } else {
+      setState(() {});
     }
   }
 
@@ -438,15 +440,21 @@ class _AppShellState extends State<AppShell> with WindowListener {
               Expanded(
                 child: Row(
                   children: [
-                    NavigationRail(
-                      selectedIndex: safeIndex,
-                      onDestinationSelected: (value) {
-                        setState(() {
-                          _index = value;
-                        });
-                      },
-                      labelType: NavigationRailLabelType.all,
-                      destinations: destinations,
+                    MouseRegion(
+                      cursor: SystemMouseCursors.click,
+                      child: SizedBox(
+                        width: 96,
+                        child: NavigationRail(
+                          selectedIndex: safeIndex,
+                          onDestinationSelected: (value) {
+                            setState(() {
+                              _index = value;
+                            });
+                          },
+                          labelType: NavigationRailLabelType.all,
+                          destinations: destinations,
+                        ),
+                      ),
                     ),
                     Expanded(
                       child: _buildPage(safeIndex),

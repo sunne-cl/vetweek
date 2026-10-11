@@ -563,6 +563,48 @@ class _TweaksPageState extends State<TweaksPage> {
     }
   }
 
+  Future<void> _disableReservedStorage(BuildContext context) async {
+    final services = widget.services;
+
+    if (!await ensureRestorePoint(context, services)) {
+      return;
+    }
+
+    if (!await ensureAdminGeneric(
+      context,
+      services,
+      'Резервируемое хранилище',
+    )) {
+      return;
+    }
+
+    final confirmed = await confirmDialog(
+      context,
+      title: 'Отключение резервируемого хранилища',
+      message:
+          'ТЕСТОВАЯ ФУНКЦИЯ. VeTweek выполнит DISM-команду отключения резервируемого хранилища Windows. Это может освободить несколько гигабайт, но является системной операцией. Может потребоваться перезагрузка. Продолжить?',
+      confirmLabel: 'Отключить',
+      danger: true,
+    );
+
+    if (!confirmed) {
+      return;
+    }
+
+    try {
+      await services.system.disableReservedStorage();
+
+      showSnack(
+        context,
+        services.system.reservedError.isNotEmpty
+            ? services.system.reservedError
+            : 'Резервируемое хранилище отключено',
+      );
+    } catch (e) {
+      showSnack(context, e.toString());
+    }
+  }
+
   Widget _buildDefenderCard() {
     final services = widget.services;
     final theme = Theme.of(context);
@@ -968,6 +1010,67 @@ class _TweaksPageState extends State<TweaksPage> {
     );
   }
 
+  Widget _buildReservedStorageCard() {
+    final services = widget.services;
+    final theme = Theme.of(context);
+
+    return SectionCard(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'Резервируемое хранилище',
+            style: theme.textTheme.titleLarge,
+          ),
+          const SizedBox(height: 12),
+          Text(
+            'Windows резервирует место на диске под обновления и системные задачи. Отключение может освободить несколько гигабайт.',
+            style: theme.textTheme.bodyMedium?.copyWith(
+              color: theme.colorScheme.onSurfaceVariant,
+            ),
+          ),
+          WarningBanner(
+            text: 'ТЕСТОВАЯ ФУНКЦИЯ. Операция выполняется через DISM и может потребовать перезагрузки. Не отключай резервируемое хранилище, если не понимаешь, зачем это нужно.',
+          ),
+          if (services.system.reservedError.isNotEmpty) ...[
+            const SizedBox(height: 12),
+            InfoRow(
+              label: 'Ошибка',
+              value: services.system.reservedError,
+            ),
+          ],
+          if (services.system.reservedMessage.isNotEmpty) ...[
+            const SizedBox(height: 12),
+            InfoRow(
+              label: 'Вывод',
+              value: services.system.reservedMessage,
+            ),
+          ],
+          if (services.system.reservedBusy) ...[
+            const SizedBox(height: 16),
+            const LinearProgressIndicator(),
+          ],
+          const SizedBox(height: 16),
+          FilledButton.icon(
+            style: FilledButton.styleFrom(
+              backgroundColor: theme.colorScheme.error,
+              foregroundColor: theme.colorScheme.onError,
+              elevation: 0,
+              shadowColor: Colors.transparent,
+            ),
+            onPressed: services.system.reservedBusy
+                ? null
+                : () {
+                    _disableReservedStorage(context);
+                  },
+            icon: const Icon(Icons.storage_outlined),
+            label: const Text('Отключить резервируемое хранилище'),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildTweakCard(Tweak tweak) {
     final services = widget.services;
     final theme = Theme.of(context);
@@ -990,10 +1093,12 @@ class _TweaksPageState extends State<TweaksPage> {
       color = tweakStatusColor(context, status);
     }
 
-    final canApply = !busy && status != TweakStatus.applied;
+    final blockedByAdmin = needsAdmin;
+    final canApply = !busy && !blockedByAdmin && status != TweakStatus.applied;
     final canRevert =
         tweak.reversible &&
         !busy &&
+        !blockedByAdmin &&
         (status == TweakStatus.applied || status == TweakStatus.partial);
 
     return TweakCard(
@@ -1081,6 +1186,20 @@ class _TweaksPageState extends State<TweaksPage> {
                   icon: const Icon(Icons.undo),
                   label: const Text('Откатить все твики'),
                 ),
+                OutlinedButton.icon(
+                  onPressed: services.system.isLoading
+                      ? null
+                      : () async {
+                          try {
+                            await services.system.restartExplorer();
+                            showSnack(context, 'Проводник перезапущен');
+                          } catch (e) {
+                            showSnack(context, e.toString());
+                          }
+                        },
+                  icon: const Icon(Icons.restart_alt),
+                  label: const Text('Перезапустить Проводник'),
+                ),
               ],
             ),
             const SizedBox(height: 16),
@@ -1091,6 +1210,8 @@ class _TweaksPageState extends State<TweaksPage> {
             _buildWidgetsCard(),
             const SizedBox(height: 16),
             _buildCleanupCard(),
+            const SizedBox(height: 16),
+            _buildReservedStorageCard(),
             const SizedBox(height: 16),
             for (final category in categories) ...[
               Padding(
@@ -1756,6 +1877,12 @@ class _SettingsPageState extends State<SettingsPage> {
                       }
                     },
                   ),
+                  SwitchListTile(
+                    title: const Text('OLED тема'),
+                    subtitle: const Text('Полностью черный фон в темной теме'),
+                    value: services.settings.oled,
+                    onChanged: services.settings.setOled,
+                  ),
                 ],
               ),
             ),
@@ -1836,7 +1963,7 @@ class _SettingsPageState extends State<SettingsPage> {
                   const SizedBox(height: 12),
                   const InfoRow(
                     label: 'Версия',
-                    value: '0.1.0',
+                    value: '0.3.0',
                   ),
                   const SizedBox(height: 12),
                   InfoRow(
