@@ -3,7 +3,6 @@ import 'package:flutter/material.dart';
 import 'package:vetweek/models.dart';
 import 'package:vetweek/services/apps.dart';
 import 'package:vetweek/services/base.dart';
-import 'package:vetweek/services/network.dart';
 import 'package:vetweek/widgets.dart';
 import 'package:vetweek/pages/shell.dart';
 
@@ -27,6 +26,8 @@ class _NetworkPageState extends State<NetworkPage> {
   final TextEditingController _gatewayController = TextEditingController();
 
   String _prefilledAlias = '';
+  bool _hostsBusy = false;
+  bool _hostsHasBackup = false;
 
   @override
   void initState() {
@@ -44,6 +45,7 @@ class _NetworkPageState extends State<NetworkPage> {
       if (widget.services.network.adapters.isEmpty) {
         widget.services.network.refreshAdapters();
       }
+      _checkHostsBackup();
     });
   }
 
@@ -84,6 +86,19 @@ class _NetworkPageState extends State<NetworkPage> {
         adapter.dnsServers.length > 1 ? adapter.dnsServers[1] : '';
     _gatewayController.text =
         adapter.gateways.isNotEmpty ? adapter.gateways[0] : '';
+  }
+
+  Future<void> _checkHostsBackup() async {
+    final result = await widget.services.powershell.run(
+      r"$ErrorActionPreference='SilentlyContinue'; if (Test-Path (Join-Path $env:APPDATA 'VeTweek\hosts_backup')) { 'HAS_BACKUP' } else { 'NO_BACKUP' }",
+      timeout: const Duration(seconds: 15),
+    );
+
+    if (mounted) {
+      setState(() {
+        _hostsHasBackup = result.stdout.trim() == 'HAS_BACKUP';
+      });
+    }
   }
 
   Future<void> _applyDns(String primary, String secondary) async {
@@ -209,6 +224,139 @@ class _NetworkPageState extends State<NetworkPage> {
     }
   }
 
+  Future<void> _applyHosts() async {
+    final services = widget.services;
+
+    if (_hostsBusy) {
+      return;
+    }
+
+    if (!await ensureAdminGeneric(context, services, 'Hosts файл')) {
+      return;
+    }
+
+    final confirmed = await confirmDialog(
+      context,
+      title: 'Применение hosts для разблокировки',
+      message:
+          'Будет скачан hosts файл с dns.malw.link и применён к системе. Оригинальный hosts будет сохранён в %APPDATA%\\VeTweek\\hosts_backup для возможного отката. Продолжить?',
+      confirmLabel: 'Применить',
+      danger: true,
+    );
+
+    if (!confirmed) {
+      return;
+    }
+
+    setState(() {
+      _hostsBusy = true;
+    });
+
+    try {
+      final url =
+          'https://raw.githubusercontent.com/ImMALWARE/dns.malw.link/refs/heads/master/hosts';
+
+      final command =
+          "\$ErrorActionPreference='Stop'; [Console]::OutputEncoding=[Text.Encoding]::UTF8; \$backupPath=Join-Path \$env:APPDATA 'VeTweek\\hosts_backup'; \$hostsPath='C:\\Windows\\System32\\drivers\\etc\\hosts'; \$dir=Split-Path \$backupPath -Parent; if(!(Test-Path \$dir)){New-Item -ItemType Directory -Path \$dir -Force | Out-Null}; Copy-Item -Path \$hostsPath -Destination \$backupPath -Force; [Net.ServicePointManager]::SecurityProtocol=[Net.SecurityProtocolType]::Tls12; Invoke-WebRequest -Uri '$url' -OutFile \$hostsPath -UseBasicParsing -ErrorAction Stop; Write-Output 'OK'";
+
+      final result = await services.powershell.run(
+        command,
+        timeout: const Duration(minutes: 2),
+      );
+
+      if (!result.success) {
+        throw result.errorOrOutput;
+      }
+
+      services.log.success(
+        'Hosts файл применён',
+        'Источник: dns.malw.link',
+      );
+
+      await _checkHostsBackup();
+
+      if (mounted) {
+        showSnack(
+          context,
+          'Hosts применён. Может потребоваться очистка DNS-кэша или перезагрузка.',
+        );
+      }
+    } catch (e) {
+      services.log.error('Ошибка применения hosts', e.toString());
+      if (mounted) {
+        showSnack(context, 'Ошибка: $e');
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _hostsBusy = false;
+        });
+      }
+    }
+  }
+
+  Future<void> _removeHosts() async {
+    final services = widget.services;
+
+    if (_hostsBusy || !_hostsHasBackup) {
+      return;
+    }
+
+    if (!await ensureAdminGeneric(context, services, 'Hosts файл')) {
+      return;
+    }
+
+    final confirmed = await confirmDialog(
+      context,
+      title: 'Откат hosts файла',
+      message:
+          'Будет восстановлен оригинальный hosts из резервной копии. Все разблокировки через dns.malw.link перестанут работать. Продолжить?',
+      confirmLabel: 'Откатить',
+      danger: true,
+    );
+
+    if (!confirmed) {
+      return;
+    }
+
+    setState(() {
+      _hostsBusy = true;
+    });
+
+    try {
+      final command =
+          r"$ErrorActionPreference='Stop'; [Console]::OutputEncoding=[Text.Encoding]::UTF8; $backupPath=Join-Path $env:APPDATA 'VeTweek\hosts_backup'; $hostsPath='C:\Windows\System32\drivers\etc\hosts'; if (!(Test-Path $backupPath)) { Write-Error 'Резервная копия не найдена'; exit 1 }; Copy-Item -Path $backupPath -Destination $hostsPath -Force; Write-Output 'OK'";
+
+      final result = await services.powershell.run(
+        command,
+        timeout: const Duration(minutes: 1),
+      );
+
+      if (!result.success) {
+        throw result.errorOrOutput;
+      }
+
+      services.log.success('Hosts файл откачен к резервной копии');
+
+      await _checkHostsBackup();
+
+      if (mounted) {
+        showSnack(context, 'Hosts откачен. Может потребоваться перезагрузка.');
+      }
+    } catch (e) {
+      services.log.error('Ошибка отката hosts', e.toString());
+      if (mounted) {
+        showSnack(context, 'Ошибка: $e');
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _hostsBusy = false;
+        });
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final services = widget.services;
@@ -224,7 +372,7 @@ class _NetworkPageState extends State<NetworkPage> {
           children: [
             const PageHeader(
               title: 'Сеть',
-              subtitle: 'DNS, шлюз, очистка кэша и сброс сети',
+              subtitle: 'DNS, hosts, шлюз, очистка кэша и сброс сети',
             ),
             SectionCard(
               child: Column(
@@ -235,8 +383,7 @@ class _NetworkPageState extends State<NetworkPage> {
                     style: theme.textTheme.titleLarge,
                   ),
                   const SizedBox(height: 16),
-                  if (network.busy)
-                    const LinearProgressIndicator(),
+                  if (network.busy) const LinearProgressIndicator(),
                   if (network.error.isNotEmpty) ...[
                     const SizedBox(height: 12),
                     InfoRow(label: 'Ошибка', value: network.error),
@@ -296,6 +443,15 @@ class _NetworkPageState extends State<NetworkPage> {
                         onPressed: network.busy
                             ? null
                             : () {
+                                _applyDns('179.254.166.171', '164.5.224.81');
+                              },
+                        icon: const Icon(Icons.shield_outlined),
+                        label: const Text('malw.link'),
+                      ),
+                      FilledButton.icon(
+                        onPressed: network.busy
+                            ? null
+                            : () {
                                 _applyDns('1.1.1.1', '1.0.0.1');
                               },
                         icon: const Icon(Icons.dns_outlined),
@@ -311,11 +467,61 @@ class _NetworkPageState extends State<NetworkPage> {
                         label: const Text('Google'),
                       ),
                       OutlinedButton.icon(
-                        onPressed: network.busy
-                            ? null
-                            : _resetDns,
+                        onPressed: network.busy ? null : _resetDns,
                         icon: const Icon(Icons.restore),
                         label: const Text('Сбросить DNS'),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 16),
+            SectionCard(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Hosts файл (разблокировка)',
+                    style: theme.textTheme.titleLarge,
+                  ),
+                  const SizedBox(height: 12),
+                  Text(
+                    'Применяет hosts файл с dns.malw.link для разблокировки заблокированных сервисов в России. Оригинал сохраняется автоматически.',
+                    style: theme.textTheme.bodyMedium?.copyWith(
+                      color: scheme.onSurfaceVariant,
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  InfoRow(
+                    label: 'Резервная копия',
+                    value: _hostsHasBackup ? 'Существует' : 'Нет',
+                  ),
+                  if (_hostsBusy) ...[
+                    const SizedBox(height: 16),
+                    const LinearProgressIndicator(),
+                  ],
+                  const SizedBox(height: 16),
+                  Wrap(
+                    spacing: 12,
+                    runSpacing: 12,
+                    children: [
+                      FilledButton.icon(
+                        onPressed: _hostsBusy ? null : _applyHosts,
+                        icon: const Icon(Icons.download),
+                        label: const Text('Применить hosts'),
+                      ),
+                      OutlinedButton.icon(
+                        onPressed:
+                            _hostsBusy || !_hostsHasBackup ? null : _removeHosts,
+                        icon: const Icon(Icons.undo),
+                        label: const Text('Откатить hosts'),
+                      ),
+                      TextButton.icon(
+                        onPressed:
+                            _hostsBusy ? null : _checkHostsBackup,
+                        icon: const Icon(Icons.refresh),
+                        label: const Text('Обновить'),
                       ),
                     ],
                   ),
@@ -380,9 +586,7 @@ class _NetworkPageState extends State<NetworkPage> {
                         label: const Text('Применить DNS'),
                       ),
                       FilledButton.icon(
-                        onPressed: network.busy
-                            ? null
-                            : _applyGateway,
+                        onPressed: network.busy ? null : _applyGateway,
                         icon: const Icon(Icons.router_outlined),
                         label: const Text('Применить шлюз'),
                       ),
@@ -410,9 +614,7 @@ class _NetworkPageState extends State<NetworkPage> {
                     runSpacing: 12,
                     children: [
                       FilledButton.icon(
-                        onPressed: network.busy
-                            ? null
-                            : _flushDns,
+                        onPressed: network.busy ? null : _flushDns,
                         icon: const Icon(Icons.cleaning_services_outlined),
                         label: const Text('Очистить кэш DNS'),
                       ),
@@ -423,9 +625,7 @@ class _NetworkPageState extends State<NetworkPage> {
                           elevation: 0,
                           shadowColor: Colors.transparent,
                         ),
-                        onPressed: network.busy
-                            ? null
-                            : _resetNetwork,
+                        onPressed: network.busy ? null : _resetNetwork,
                         icon: const Icon(Icons.network_check),
                         label: const Text('Сбросить сеть'),
                       ),
@@ -561,9 +761,7 @@ class _DevPageState extends State<DevPage> {
 
     final confirmed = await confirmDialog(
       context,
-      title: enable
-          ? 'Включение компонента'
-          : 'Отключение компонента',
+      title: enable ? 'Включение компонента' : 'Отключение компонента',
       message: component.warning.isEmpty
           ? 'Компонент: ${component.displayName}. Требуется перезагрузка.'
           : component.warning,
@@ -1375,8 +1573,7 @@ class _DevPageState extends State<DevPage> {
             const SizedBox(height: 16),
             _buildLegalCard(),
             const SizedBox(height: 16),
-            if (dev.busy || dev.policyBusy)
-              const LinearProgressIndicator(),
+            if (dev.busy || dev.policyBusy) const LinearProgressIndicator(),
             if (dev.error.isNotEmpty) ...[
               const SizedBox(height: 16),
               SectionCard(
@@ -1518,9 +1715,7 @@ class _DevPageState extends State<DevPage> {
                         label: const Text('Обновить статус'),
                       ),
                       OutlinedButton.icon(
-                        onPressed: dev.busy
-                            ? null
-                            : _openDevSettings,
+                        onPressed: dev.busy ? null : _openDevSettings,
                         icon: const Icon(Icons.open_in_new),
                         label: const Text('Открыть параметры разработчика'),
                       ),

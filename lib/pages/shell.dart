@@ -8,6 +8,8 @@ import 'package:vetweek/services/system.dart';
 import 'package:vetweek/services/tweaks.dart';
 import 'package:vetweek/widgets.dart';
 import 'package:vetweek/pages/core_pages.dart';
+import 'package:vetweek/pages/core_pages1.dart';
+import 'package:vetweek/pages/core_pages2.dart';
 import 'package:vetweek/pages/dev_pages.dart';
 
 void showSnack(BuildContext context, String message) {
@@ -140,7 +142,7 @@ Future<void> showWelcomeDialog(BuildContext context) async {
                           ),
                           const SizedBox(height: 2),
                           Text(
-                            'Версия 0.4.0',
+                            'Версия 0.5.0',
                             style: theme.textTheme.bodySmall?.copyWith(
                               color: scheme.onSurfaceVariant,
                             ),
@@ -435,9 +437,9 @@ class _AppShellState extends State<AppShell> with WindowListener {
 
     widget.services.appx.setQuery(query);
 
-    if (query.trim().isNotEmpty && _index != 2) {
+    if (query.trim().isNotEmpty && _index != 3) {
       setState(() {
-        _index = 2;
+        _index = 3;
       });
     } else {
       setState(() {});
@@ -503,19 +505,21 @@ class _AppShellState extends State<AppShell> with WindowListener {
           services: widget.services,
           onOpenCleanup: () {
             setState(() {
-              _index = 1;
+              _index = 2;
             });
           },
         );
       case 1:
-        return TweaksPage(services: widget.services);
+        return FastSettingsPage(services: widget.services);
       case 2:
-        return AppsPage(services: widget.services);
+        return TweaksPage(services: widget.services);
       case 3:
-        return NetworkPage(services: widget.services);
+        return AppsPage(services: widget.services);
       case 4:
-        return LogsPage(services: widget.services);
+        return NetworkPage(services: widget.services);
       case 5:
+        return LogsPage(services: widget.services);
+      case 6:
         return SettingsPage(services: widget.services);
       default:
         return DevPage(services: widget.services);
@@ -533,6 +537,11 @@ class _AppShellState extends State<AppShell> with WindowListener {
         icon: Icon(Icons.dashboard_outlined),
         selectedIcon: Icon(Icons.dashboard),
         label: Text('Главная'),
+      ),
+      const NavigationRailDestination(
+        icon: Icon(Icons.bolt_outlined),
+        selectedIcon: Icon(Icons.bolt),
+        label: Text('Быстрое'),
       ),
       const NavigationRailDestination(
         icon: Icon(Icons.tune_outlined),
