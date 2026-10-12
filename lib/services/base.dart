@@ -526,6 +526,7 @@ class AppServices {
   late final DefenderService defender;
   late final AdvertisingService advertising;
   late final WidgetsService widgets;
+  late final WindowsUpdateService windowsUpdate;
   late final CleanupService cleanup;
   late final RestorePointService restorePoint;
   late final AppxService appx;
@@ -555,6 +556,12 @@ class AppServices {
       registry: registry,
     );
     widgets = WidgetsService(shell: powershell, log: log);
+    windowsUpdate = WindowsUpdateService(
+      shell: powershell,
+      log: log,
+      registry: registry,
+      system: system,
+    );
     cleanup = CleanupService(shell: powershell, log: log);
     restorePoint = RestorePointService(shell: powershell, log: log);
     appx = AppxService(shell: powershell, log: log);

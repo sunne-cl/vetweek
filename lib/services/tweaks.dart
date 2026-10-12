@@ -432,6 +432,258 @@ class WidgetsService extends ChangeNotifier {
   }
 }
 
+class WindowsUpdateService extends ChangeNotifier {
+  final PowerShellService shell;
+  final LogService log;
+  final RegistryService registry;
+  final SystemService system;
+
+  static const List<String> versionPresets = [
+    '21H2',
+    '22H2',
+    '23H2',
+    '24H2',
+    '25H2',
+  ];
+
+  static const String _wuKey =
+      r'SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate';
+
+  bool busy = false;
+  String error = '';
+  bool checked = false;
+  bool serviceDisabled = false;
+  int cacheBytes = 0;
+  bool targetBlocked = false;
+  String targetVersion = '';
+
+  WindowsUpdateService({
+    required this.shell,
+    required this.log,
+    required this.registry,
+    required this.system,
+  });
+
+  RegistryOp _trvOp() {
+    return RegistryOp(
+      hive: Hive.hklm,
+      key: _wuKey,
+      valueName: 'TargetReleaseVersion',
+      type: RegValueType.dword,
+      applyValue: 1,
+      applyAction: RegAction.setValue,
+      revertAction: RegAction.deleteValue,
+    );
+  }
+
+  RegistryOp _trvInfoOp() {
+    return RegistryOp(
+      hive: Hive.hklm,
+      key: _wuKey,
+      valueName: 'TargetReleaseVersionInfo',
+      type: RegValueType.string,
+      applyValue: null,
+      applyAction: RegAction.setValue,
+      revertAction: RegAction.deleteValue,
+    );
+  }
+
+  Future<void> refresh() async {
+    if (busy) {
+      return;
+    }
+
+    busy = true;
+    error = '';
+    notifyListeners();
+
+    try {
+      final serviceCommand =
+          r"$ErrorActionPreference='Stop'; [Console]::OutputEncoding=[Text.Encoding]::UTF8; $s=(Get-Service -Name wuauserv -ErrorAction SilentlyContinue).StartType; if($s){[string]$s}else{'UNKNOWN'}";
+
+      final serviceResult = await shell.run(
+        serviceCommand,
+        timeout: const Duration(seconds: 25),
+      );
+
+      if (serviceResult.success) {
+        serviceDisabled =
+            serviceResult.stdout.trim() == 'Disabled';
+      }
+
+      final cacheCommand =
+          r"$ErrorActionPreference='SilentlyContinue'; [Console]::OutputEncoding=[Text.Encoding]::UTF8; (Get-ChildItem -Path 'C:\Windows\SoftwareDistribution\Download' -Recurse -Force -ErrorAction SilentlyContinue | Measure-Object -Property Length -Sum).Sum";
+
+      final cacheResult = await shell.run(
+        cacheCommand,
+        timeout: const Duration(seconds: 40),
+      );
+
+      if (cacheResult.success) {
+        cacheBytes = int.tryParse(cacheResult.stdout.trim()) ?? 0;
+      }
+
+      final reads = await registry.readMany([_trvOp(), _trvInfoOp()]);
+
+      targetBlocked = reads[0].value == '1';
+      targetVersion = reads[1].missing || reads[1].isNull ? '' : reads[1].value;
+
+      checked = true;
+    } catch (e) {
+      error = e.toString();
+      log.error('Ошибка чтения состояния Windows Update', error);
+    } finally {
+      busy = false;
+      notifyListeners();
+    }
+  }
+
+  Future<void> pause() async {
+    await _run(
+      r"$ErrorActionPreference='Stop'; [Console]::OutputEncoding=[Text.Encoding]::UTF8; Set-Service -Name wuauserv -StartupType Disabled -ErrorAction Stop; Stop-Service -Name wuauserv -Force -ErrorAction SilentlyContinue; Write-Output 'OK'",
+      'Служба Windows Update приостановлена',
+    );
+  }
+
+  Future<void> resume() async {
+    await _run(
+      r"$ErrorActionPreference='Stop'; [Console]::OutputEncoding=[Text.Encoding]::UTF8; Set-Service -Name wuauserv -StartupType Manual -ErrorAction Stop; Start-Service -Name wuauserv -ErrorAction SilentlyContinue; Write-Output 'OK'",
+      'Служба Windows Update возобновлена',
+    );
+  }
+
+  Future<int> clearCache() async {
+    if (busy) {
+      return 0;
+    }
+
+    busy = true;
+    error = '';
+    notifyListeners();
+
+    try {
+      final before = cacheBytes;
+
+      final command =
+          r"$ErrorActionPreference='SilentlyContinue'; [Console]::OutputEncoding=[Text.Encoding]::UTF8; Stop-Service -Name wuauserv -Force -ErrorAction SilentlyContinue; Stop-Service -Name bits -Force -ErrorAction SilentlyContinue; Remove-Item -Path 'C:\Windows\SoftwareDistribution\Download\*' -Recurse -Force -ErrorAction SilentlyContinue; Start-Service -Name wuauserv -ErrorAction SilentlyContinue; Start-Service -Name bits -ErrorAction SilentlyContinue; Write-Output 'OK'";
+
+      final result = await shell.run(
+        command,
+        timeout: const Duration(minutes: 5),
+      );
+
+      if (!result.success) {
+        throw result.errorOrOutput;
+      }
+
+      await refresh();
+
+      final freed = before - cacheBytes;
+
+      log.success(
+        'Кэш Windows Update очищен',
+        'Освобождено примерно: ${freed > 0 ? freed : 0} байт',
+      );
+
+      return freed > 0 ? freed : 0;
+    } catch (e) {
+      error = e.toString();
+      log.error('Не удалось очистить кэш Windows Update', error);
+      rethrow;
+    } finally {
+      busy = false;
+      notifyListeners();
+    }
+  }
+
+  Future<void> blockVersion(String version) async {
+    if (busy) {
+      return;
+    }
+
+    busy = true;
+    error = '';
+    notifyListeners();
+
+    try {
+      await registry.write(_trvOp(), 1);
+      await registry.write(_trvInfoOp(), version);
+
+      log.success(
+        'Обновления заблокированы на версии',
+        version,
+      );
+
+      await refresh();
+    } catch (e) {
+      error = e.toString();
+      log.error('Не удалось заблокировать версию обновлений', error);
+      rethrow;
+    } finally {
+      busy = false;
+      notifyListeners();
+    }
+  }
+
+  Future<void> unblockVersion() async {
+    if (busy) {
+      return;
+    }
+
+    busy = true;
+    error = '';
+    notifyListeners();
+
+    try {
+      await registry.deleteValue(_trvOp());
+      await registry.deleteValue(_trvInfoOp());
+
+      log.success('Блокировка версии обновлений снята');
+
+      await refresh();
+    } catch (e) {
+      error = e.toString();
+      log.error('Не удалось снять блокировку версии обновлений', error);
+      rethrow;
+    } finally {
+      busy = false;
+      notifyListeners();
+    }
+  }
+
+  Future<void> _run(String command, String successMessage) async {
+    if (busy) {
+      return;
+    }
+
+    busy = true;
+    error = '';
+    notifyListeners();
+
+    try {
+      final result = await shell.run(
+        command,
+        timeout: const Duration(seconds: 60),
+      );
+
+      if (!result.success) {
+        throw result.errorOrOutput;
+      }
+
+      log.success(successMessage);
+
+      await refresh();
+    } catch (e) {
+      error = e.toString();
+      log.error(successMessage, error);
+      rethrow;
+    } finally {
+      busy = false;
+      notifyListeners();
+    }
+  }
+}
+
 class TweakCatalog {
   static List<Tweak> build() {
     final tweaks = <Tweak>[];
@@ -727,7 +979,7 @@ class TweakCatalog {
           id: 'explorer.gallery.show',
           title: 'Включить Галерейный вид в Проводнике',
           description:
-              'Восстанавливает системный раздел Галереи с продвиннутым отображением изображений в навигации Проводника.',
+              'Восстанавливает системный раздел Галереи с продвинутым отображением изображений в навигации Проводника.',
           category: TweakCategory.explorer,
           requiresAdmin: true,
           reversible: true,
@@ -753,7 +1005,7 @@ class TweakCatalog {
       RegistryTweakWrapper(
         RegistryTweak(
           id: 'explorer.home',
-          title: 'Скрыть Главную в Проводнике',
+          title: 'Открывать Проводник в «Этот компьютер»',
           description:
               'Переключает открытие Проводника на «Этот компьютер» вместо раздела «Главная».',
           category: TweakCategory.explorer,
@@ -772,6 +1024,210 @@ class TweakCatalog {
               applyAction: RegAction.setValue,
               revertAction: RegAction.setValue,
               revertValue: 2,
+              missingCountsAsReverted: true,
+            ),
+          ],
+        ),
+      ),
+    );
+
+    tweaks.add(
+      RegistryTweakWrapper(
+        RegistryTweak(
+          id: 'fast.hidden',
+          title: 'Показывать скрытые файлы и папки',
+          description:
+              'Включает отображение скрытых файлов и папок в Проводнике.',
+          category: TweakCategory.explorer,
+          requiresAdmin: false,
+          reversible: true,
+          ops: [
+            RegistryOp(
+              hive: Hive.hkcu,
+              key:
+                  r'Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced',
+              valueName: 'Hidden',
+              type: RegValueType.dword,
+              applyValue: 1,
+              applyAction: RegAction.setValue,
+              revertAction: RegAction.setValue,
+              revertValue: 2,
+              missingCountsAsReverted: true,
+            ),
+          ],
+        ),
+      ),
+    );
+
+    tweaks.add(
+      RegistryTweakWrapper(
+        RegistryTweak(
+          id: 'fast.extensions',
+          title: 'Показывать расширения файлов',
+          description:
+              'Показывает расширения файлов. Защищает от масок вида документ.exe.txt.',
+          category: TweakCategory.explorer,
+          requiresAdmin: false,
+          reversible: true,
+          ops: [
+            RegistryOp(
+              hive: Hive.hkcu,
+              key:
+                  r'Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced',
+              valueName: 'HideFileExt',
+              type: RegValueType.dword,
+              applyValue: 0,
+              applyAction: RegAction.setValue,
+              revertAction: RegAction.setValue,
+              revertValue: 1,
+              missingCountsAsReverted: true,
+            ),
+          ],
+        ),
+      ),
+    );
+
+    tweaks.add(
+      RegistryTweakWrapper(
+        RegistryTweak(
+          id: 'fast.desktopicon',
+          title: 'Показывать иконку «Этот компьютер» на рабочем столе',
+          description:
+              'Добавляет системную иконку «Этот компьютер» на рабочий стол.',
+          category: TweakCategory.explorer,
+          requiresAdmin: false,
+          reversible: true,
+          ops: [
+            RegistryOp(
+              hive: Hive.hkcu,
+              key:
+                  r'Software\Microsoft\Windows\CurrentVersion\Explorer\HideDesktopIcons\NewStartPanel',
+              valueName: '{20D04FE0-3AEA-1069-A2D8-08002B30309D}',
+              type: RegValueType.dword,
+              applyValue: 0,
+              applyAction: RegAction.setValue,
+              revertAction: RegAction.setValue,
+              revertValue: 1,
+              missingCountsAsReverted: true,
+            ),
+          ],
+        ),
+      ),
+    );
+
+    tweaks.add(
+      CommandTweakWrapper(
+        CommandTweak(
+          id: 'fast.shortcutname',
+          title: 'Убрать приписку «- ярлык» у новых ярлыков',
+          description:
+              'Новые ярлыки создаются без добавления слова «- ярлык» в имя.',
+          category: TweakCategory.explorer,
+          requiresAdmin: false,
+          reversible: true,
+          warning:
+              'Действует только на ярлыки, созданные после применения твика.',
+          applyCommand:
+              r"$ErrorActionPreference='Stop'; [Console]::OutputEncoding=[Text.Encoding]::UTF8; Set-ItemProperty -Path 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer' -Name 'link' -Value ([byte[]](0x00,0x00,0x00,0x00)) -Type Binary; Write-Output 'OK'",
+          revertCommand:
+              r"$ErrorActionPreference='Stop'; [Console]::OutputEncoding=[Text.Encoding]::UTF8; Set-ItemProperty -Path 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer' -Name 'link' -Value ([byte[]](0x1e,0x00,0x00,0x00)) -Type Binary; Write-Output 'OK'",
+          statusCommand:
+              r"$ErrorActionPreference='Stop'; [Console]::OutputEncoding=[Text.Encoding]::UTF8; $v=(Get-ItemProperty -Path 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer' -Name 'link' -ErrorAction SilentlyContinue).link; if($v -ne $null -and $v.Length -ge 4 -and $v[0] -eq 0 -and $v[1] -eq 0 -and $v[2] -eq 0 -and $v[3] -eq 0){'APPLIED'}else{'NOT'}",
+          appliedToken: 'APPLIED',
+          notAppliedToken: 'NOT',
+        ),
+      ),
+    );
+
+    tweaks.add(
+      RegistryTweakWrapper(
+        RegistryTweak(
+          id: 'fast.dedupdrives',
+          title: 'Убрать дублирование дисков в боковой панели',
+          description:
+              'Удаляет системный раздел DelegateFolders, из-за которого флешки и внешние диски дублируются в навигации Проводника.',
+          category: TweakCategory.explorer,
+          requiresAdmin: true,
+          reversible: true,
+          warning:
+              'После применения перезапустите Проводник. Откат восстанавливает раздел.',
+          ops: [
+            RegistryOp(
+              hive: Hive.hklm,
+              key:
+                  r'SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\Desktop\NameSpace\DelegateFolders\{F5FB2C77-0E2F-4A16-A381-3E560C68BC83}',
+              isDefault: true,
+              type: RegValueType.string,
+              applyValue: null,
+              applyAction: RegAction.deleteKey,
+              revertAction: RegAction.setValue,
+              revertValue: '',
+            ),
+          ],
+        ),
+      ),
+    );
+
+    tweaks.add(
+      RegistryTweakWrapper(
+        RegistryTweak(
+          id: 'fast.taskbaral',
+          title: 'Панель задач слева (Windows 11)',
+          description:
+              'Перемещает кнопки панели задач влево, как в классической раскладке Windows.',
+          category: TweakCategory.explorer,
+          requiresAdmin: false,
+          reversible: true,
+          warning: 'Работает только в Windows 11.',
+          ops: [
+            RegistryOp(
+              hive: Hive.hkcu,
+              key:
+                  r'Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced',
+              valueName: 'TaskbarAl',
+              type: RegValueType.dword,
+              applyValue: 0,
+              applyAction: RegAction.setValue,
+              revertAction: RegAction.setValue,
+              revertValue: 1,
+              missingCountsAsReverted: true,
+            ),
+          ],
+        ),
+      ),
+    );
+
+    tweaks.add(
+      RegistryTweakWrapper(
+        RegistryTweak(
+          id: 'fast.darkmode',
+          title: 'Системная темная тема Windows',
+          description:
+              'Переключает приложения и систему на темный режим оформления Windows.',
+          category: TweakCategory.explorer,
+          requiresAdmin: false,
+          reversible: true,
+          ops: [
+            RegistryOp(
+              hive: Hive.hkcu,
+              key: r'Software\Microsoft\Windows\CurrentVersion\Themes\Personalize',
+              valueName: 'AppsUseLightTheme',
+              type: RegValueType.dword,
+              applyValue: 0,
+              applyAction: RegAction.setValue,
+              revertAction: RegAction.setValue,
+              revertValue: 1,
+              missingCountsAsReverted: true,
+            ),
+            RegistryOp(
+              hive: Hive.hkcu,
+              key: r'Software\Microsoft\Windows\CurrentVersion\Themes\Personalize',
+              valueName: 'SystemUsesLightTheme',
+              type: RegValueType.dword,
+              applyValue: 0,
+              applyAction: RegAction.setValue,
+              revertAction: RegAction.setValue,
+              revertValue: 1,
               missingCountsAsReverted: true,
             ),
           ],
@@ -1049,21 +1505,96 @@ class TweakCatalog {
     tweaks.add(
       CommandTweakWrapper(
         CommandTweak(
-          id: 'system.windowsupdate',
-          title: 'Отключить обновления Windows',
+          id: 'system.bootmenu.legacy',
+          title: 'Старый загрузчик системы (legacy)',
           description:
-              'Полностью отключает службу обновлений Windows (wuauserv). Без паузы на 30 дней.',
+              'Включает классическое текстовое меню загрузки в стиле Windows 7 через bcdedit.',
           category: TweakCategory.system,
           requiresAdmin: true,
           reversible: true,
           warning:
-              'ОПАСНО. Отключение обновлений оставляет систему без патчей безопасности. Включайте обратно сразу после необходимости. Возможны сбои Microsoft Store и компонентов, зависящих от wuauserv.',
+              'Изменяет конфигурацию загрузки. Ошибка загрузчика может потребовать восстановления. Действует после перезагрузки.',
           applyCommand:
-              r"$ErrorActionPreference='Stop'; [Console]::OutputEncoding=[Text.Encoding]::UTF8; Set-Service -Name wuauserv -StartupType Disabled -ErrorAction Stop; Stop-Service -Name wuauserv -Force -ErrorAction SilentlyContinue; Write-Output 'OK'",
+              r"$ErrorActionPreference='Stop'; [Console]::OutputEncoding=[Text.Encoding]::UTF8; bcdedit /set '{current}' bootmenupolicy legacy; Write-Output 'OK'",
           revertCommand:
-              r"$ErrorActionPreference='Stop'; [Console]::OutputEncoding=[Text.Encoding]::UTF8; Set-Service -Name wuauserv -StartupType Manual -ErrorAction Stop; Write-Output 'OK'",
+              r"$ErrorActionPreference='Stop'; [Console]::OutputEncoding=[Text.Encoding]::UTF8; bcdedit /set '{current}' bootmenupolicy standard; Write-Output 'OK'",
           statusCommand:
-              r"$ErrorActionPreference='Stop'; [Console]::OutputEncoding=[Text.Encoding]::UTF8; $s=(Get-Service -Name wuauserv -ErrorAction SilentlyContinue).StartType; if($s -eq 'Disabled'){'APPLIED'}elseif($s){'NOT'}else{'UNKNOWN'}",
+              r"$ErrorActionPreference='Stop'; [Console]::OutputEncoding=[Text.Encoding]::UTF8; $o=(bcdedit /enum '{current}') -join ' '; if($o -like '*legacy*'){'APPLIED'}else{'NOT'}",
+          appliedToken: 'APPLIED',
+          notAppliedToken: 'NOT',
+        ),
+      ),
+    );
+
+    tweaks.add(
+      CommandTweakWrapper(
+        CommandTweak(
+          id: 'system.bootmenu.display',
+          title: 'Меню загрузки при каждом старте',
+          description:
+              'Показывает меню выбора загрузки перед каждым стартом системы через bcdedit.',
+          category: TweakCategory.system,
+          requiresAdmin: true,
+          reversible: true,
+          warning:
+              'Изменяет конфигурацию загрузчика. При каждой загрузке будет появляться меню выбора.',
+          applyCommand:
+              r"$ErrorActionPreference='Stop'; [Console]::OutputEncoding=[Text.Encoding]::UTF8; bcdedit /set '{bootmgr}' displaybootmenu yes; Write-Output 'OK'",
+          revertCommand:
+              r"$ErrorActionPreference='Stop'; [Console]::OutputEncoding=[Text.Encoding]::UTF8; bcdedit /set '{bootmgr}' displaybootmenu no; Write-Output 'OK'",
+          statusCommand:
+              r"$ErrorActionPreference='Stop'; [Console]::OutputEncoding=[Text.Encoding]::UTF8; $o=(bcdedit /enum '{bootmgr}') -join ' '; if($o -like '*yes*'){'APPLIED'}else{'NOT'}",
+          appliedToken: 'APPLIED',
+          notAppliedToken: 'NOT',
+        ),
+      ),
+    );
+
+    tweaks.add(
+      RegistryTweakWrapper(
+        RegistryTweak(
+          id: 'system.ttl65',
+          title: 'Обход ограничения раздачи интернета (TTL 65)',
+          description:
+              'Устанавливает DefaultTTL 65 в параметрах Tcpip. Помогает против детекции раздачи трафика мобильными операторами.',
+          category: TweakCategory.system,
+          requiresAdmin: true,
+          reversible: true,
+          warning:
+              'Может нарушать условия договора оператора связи. Используйте на свой риск.',
+          ops: [
+            RegistryOp(
+              hive: Hive.hklm,
+              key: r'SYSTEM\CurrentControlSet\Services\Tcpip\Parameters',
+              valueName: 'DefaultTTL',
+              type: RegValueType.dword,
+              applyValue: 65,
+              applyAction: RegAction.setValue,
+              revertAction: RegAction.deleteValue,
+            ),
+          ],
+        ),
+      ),
+    );
+
+    tweaks.add(
+      CommandTweakWrapper(
+        CommandTweak(
+          id: 'system.pagefile.disable',
+          title: 'Отключить файл подкачки',
+          description:
+              'Полностью отключает файл подкачки через управление параметрами Win32_ComputerSystem и Win32_PageFileSetting.',
+          category: TweakCategory.system,
+          requiresAdmin: true,
+          reversible: true,
+          warning:
+              'ОПАСНО. Только для ПК с большим объемом ОЗУ. Без файла подкачки системы с малой памятью могут падать с нехваткой памяти. Требуется перезагрузка.',
+          applyCommand:
+              r"$ErrorActionPreference='Stop'; [Console]::OutputEncoding=[Text.Encoding]::UTF8; $cs=Get-CimInstance Win32_ComputerSystem; $cs | Set-CimInstance -Property @{AutomaticManagedPagefile=$false}; Get-CimInstance Win32_PageFileSetting -ErrorAction SilentlyContinue | Remove-CimInstance -ErrorAction SilentlyContinue; Write-Output 'OK'",
+          revertCommand:
+              r"$ErrorActionPreference='Stop'; [Console]::OutputEncoding=[Text.Encoding]::UTF8; $cs=Get-CimInstance Win32_ComputerSystem; $cs | Set-CimInstance -Property @{AutomaticManagedPagefile=$true}; Write-Output 'OK'",
+          statusCommand:
+              r"$ErrorActionPreference='Stop'; [Console]::OutputEncoding=[Text.Encoding]::UTF8; $cs=Get-CimInstance Win32_ComputerSystem; if($cs.AutomaticManagedPagefile -eq $false){'APPLIED'}else{'NOT'}",
           appliedToken: 'APPLIED',
           notAppliedToken: 'NOT',
         ),
