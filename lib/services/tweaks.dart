@@ -642,6 +642,31 @@ class TweakCatalog {
     tweaks.add(
       RegistryTweakWrapper(
         RegistryTweak(
+          id: 'privacy.clipboard.sync',
+          title: 'Отключить синхронизацию буфера обмена между устройствами',
+          description:
+              'Запрещает Windows передавать содержимое буфера обмена на другие устройства через облако.',
+          category: TweakCategory.privacy,
+          requiresAdmin: true,
+          reversible: true,
+          ops: [
+            RegistryOp(
+              hive: Hive.hklm,
+              key: r'SOFTWARE\Policies\Microsoft\Windows\System',
+              valueName: 'AllowCrossDeviceClipboard',
+              type: RegValueType.dword,
+              applyValue: 0,
+              applyAction: RegAction.setValue,
+              revertAction: RegAction.deleteValue,
+            ),
+          ],
+        ),
+      ),
+    );
+
+    tweaks.add(
+      RegistryTweakWrapper(
+        RegistryTweak(
           id: 'explorer.classicmenu',
           title: 'Классическое контекстное меню',
           description:
@@ -699,6 +724,34 @@ class TweakCatalog {
     tweaks.add(
       RegistryTweakWrapper(
         RegistryTweak(
+          id: 'explorer.gallery.show',
+          title: 'Включить Галерейный вид в Проводнике',
+          description:
+              'Восстанавливает системный раздел Галереи с продвиннутым отображением изображений в навигации Проводника.',
+          category: TweakCategory.explorer,
+          requiresAdmin: true,
+          reversible: true,
+          warning:
+              'Доступно только на сборках Windows 11 с поддержкой Галереи. После применения перезапустите Проводник.',
+          ops: [
+            RegistryOp(
+              hive: Hive.hklm,
+              key:
+                  r'SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\Desktop\NameSpace_46351065\{e88865b5-3e64-4361-bc3b-55034d442721}',
+              isDefault: true,
+              type: RegValueType.string,
+              applyValue: '',
+              applyAction: RegAction.setValue,
+              revertAction: RegAction.deleteKey,
+            ),
+          ],
+        ),
+      ),
+    );
+
+    tweaks.add(
+      RegistryTweakWrapper(
+        RegistryTweak(
           id: 'explorer.home',
           title: 'Скрыть Главную в Проводнике',
           description:
@@ -720,6 +773,112 @@ class TweakCatalog {
               revertAction: RegAction.setValue,
               revertValue: 2,
               missingCountsAsReverted: true,
+            ),
+          ],
+        ),
+      ),
+    );
+
+    tweaks.add(
+      RegistryTweakWrapper(
+        RegistryTweak(
+          id: 'explorer.separateprocess',
+          title: 'Запускать папки Проводника в отдельном процессе',
+          description:
+              'Включает SeparateProcess. Зависание одного окна папки не роняет весь Проводник, рабочий стол и панель задач.',
+          category: TweakCategory.explorer,
+          requiresAdmin: false,
+          reversible: true,
+          warning:
+              'Вступает в силу после перезапуска Проводника или выхода из системы. Незначительно увеличивает потребление памяти.',
+          ops: [
+            RegistryOp(
+              hive: Hive.hkcu,
+              key:
+                  r'Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced',
+              valueName: 'SeparateProcess',
+              type: RegValueType.dword,
+              applyValue: 1,
+              applyAction: RegAction.setValue,
+              revertAction: RegAction.setValue,
+              revertValue: 0,
+              missingCountsAsReverted: true,
+            ),
+          ],
+        ),
+      ),
+    );
+
+    tweaks.add(
+      RegistryTweakWrapper(
+        RegistryTweak(
+          id: 'explorer.mycomputer.folders',
+          title: 'Убрать мусорные папки из «Этот компьютер»',
+          description:
+              'Удаляет из «Этот компьютер» системные ярлыки «3D-объекты», «Музыка» и «Видео». Сами папки на диске не удаляются.',
+          category: TweakCategory.explorer,
+          requiresAdmin: true,
+          reversible: true,
+          warning:
+              'Удаляет системные ключи навигации. После применения перезапустите Проводник. На отдельных сборках CLSID папок могут отличаться, тогда папки останутся видимыми.',
+          ops: [
+            RegistryOp(
+              hive: Hive.hklm,
+              key:
+                  r'SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\MyComputer\NameSpace\{0DB7E03F-FC29-4DC6-9020-FF41B59E513D}',
+              isDefault: true,
+              type: RegValueType.string,
+              applyValue: null,
+              applyAction: RegAction.deleteKey,
+              revertAction: RegAction.setValue,
+            ),
+            RegistryOp(
+              hive: Hive.hklm,
+              key:
+                  r'SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\MyComputer\NameSpace\{3dfdf296-dbec-4fb4-81d1-6a3438bcf4de}',
+              isDefault: true,
+              type: RegValueType.string,
+              applyValue: null,
+              applyAction: RegAction.deleteKey,
+              revertAction: RegAction.setValue,
+            ),
+            RegistryOp(
+              hive: Hive.hklm,
+              key:
+                  r'SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\MyComputer\NameSpace\{f86fa3ab-70d2-4fc7-9c99-fcbf05467f3a}',
+              isDefault: true,
+              type: RegValueType.string,
+              applyValue: null,
+              applyAction: RegAction.deleteKey,
+              revertAction: RegAction.setValue,
+            ),
+          ],
+        ),
+      ),
+    );
+
+    tweaks.add(
+      RegistryTweakWrapper(
+        RegistryTweak(
+          id: 'explorer.seconds',
+          title: 'Показывать секунды в системных часах',
+          description:
+              'Включает отображение секунд в часах на панели задач через ShowSecondsInSystemClock.',
+          category: TweakCategory.explorer,
+          requiresAdmin: false,
+          reversible: true,
+          warning:
+              'Работает на Windows 10 и Windows 11 24H2 и новее. На промежуточных сборках Windows 11 параметр может игнорироваться. Требуется перезапуск Проводника.',
+          ops: [
+            RegistryOp(
+              hive: Hive.hkcu,
+              key:
+                  r'Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced',
+              valueName: 'ShowSecondsInSystemClock',
+              type: RegValueType.dword,
+              applyValue: 1,
+              applyAction: RegAction.setValue,
+              revertAction: RegAction.deleteValue,
             ),
           ],
         ),
@@ -806,6 +965,35 @@ class TweakCatalog {
           ],
           applyShell:
               r"$ErrorActionPreference='SilentlyContinue'; [Console]::OutputEncoding=[Text.Encoding]::UTF8; Stop-Process -Name 'OneDrive' -Force -ErrorAction SilentlyContinue; Write-Output 'OK'",
+        ),
+      ),
+    );
+
+    tweaks.add(
+      RegistryTweakWrapper(
+        RegistryTweak(
+          id: 'system.clipboard.history',
+          title: 'Включить историю буфера обмена',
+          description:
+              'Включает историю буфера обмена (Win+V). Windows хранит до 25 элементов, размер истории через реестр не увеличивается.',
+          category: TweakCategory.system,
+          requiresAdmin: false,
+          reversible: true,
+          warning:
+              'Скопированные данные сохраняются локально в истории буфера обмена до очистки или перезагрузки.',
+          ops: [
+            RegistryOp(
+              hive: Hive.hkcu,
+              key: r'Software\Microsoft\Clipboard',
+              valueName: 'EnableClipboardHistory',
+              type: RegValueType.dword,
+              applyValue: 1,
+              applyAction: RegAction.setValue,
+              revertAction: RegAction.setValue,
+              revertValue: 0,
+              missingCountsAsReverted: true,
+            ),
+          ],
         ),
       ),
     );
@@ -1173,10 +1361,48 @@ class TweakCatalog {
     tweaks.add(
       RegistryTweakWrapper(
         RegistryTweak(
-          id: 'performance.ui.instantresponse',
-          title: 'Мгновенный отклик интерфейса',
+          id: 'performance.keyboard',
+          title: 'Снизить задержку повтора клавиатуры',
           description:
-              'Убирает задержку контекстных меню и ускоряет завершение зависших приложений.',
+              'Устанавливает KeyboardDelay в 0 и KeyboardSpeed в 31. Символы при зажатии клавиши повторяются с минимальной задержкой.',
+          category: TweakCategory.performance,
+          requiresAdmin: false,
+          reversible: true,
+          warning:
+              'Вступает в силу после выхода из системы. Слишком быстрый повтор может мешать при наборе текста.',
+          ops: [
+            RegistryOp(
+              hive: Hive.hkcu,
+              key: r'Control Panel\Keyboard',
+              valueName: 'KeyboardDelay',
+              type: RegValueType.string,
+              applyValue: '0',
+              applyAction: RegAction.setValue,
+              revertAction: RegAction.setValue,
+              revertValue: '1',
+            ),
+            RegistryOp(
+              hive: Hive.hkcu,
+              key: r'Control Panel\Keyboard',
+              valueName: 'KeyboardSpeed',
+              type: RegValueType.string,
+              applyValue: '31',
+              applyAction: RegAction.setValue,
+              revertAction: RegAction.setValue,
+              revertValue: '31',
+            ),
+          ],
+        ),
+      ),
+    );
+
+    tweaks.add(
+      RegistryTweakWrapper(
+        RegistryTweak(
+          id: 'performance.ui.instantresponse',
+          title: 'Мгновенный отклик интерфейса и быстрое выключение',
+          description:
+              'Убирает задержку контекстных меню и ускоряет завершение зависших приложений при выключении ПК.',
           category: TweakCategory.performance,
           requiresAdmin: false,
           reversible: true,

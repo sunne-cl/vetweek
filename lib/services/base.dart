@@ -340,6 +340,7 @@ class StateService {
   final Map<String, Object?> _startupBackups = {};
   final Map<String, Object?> _devBackups = {};
   bool _restorePointSuggested = false;
+  bool _firstLaunchCompleted = false;
   DateTime? _lastCheckTime;
 
   Map<String, String> get tweakStatuses => Map.unmodifiable(_tweakStatuses);
@@ -353,6 +354,8 @@ class StateService {
   Map<String, Object?> get devBackups => Map.unmodifiable(_devBackups);
 
   bool get restorePointSuggested => _restorePointSuggested;
+
+  bool get firstLaunchCompleted => _firstLaunchCompleted;
 
   DateTime? get lastCheckTime => _lastCheckTime;
 
@@ -404,6 +407,10 @@ class StateService {
 
   void markRestorePointSuggested() {
     _restorePointSuggested = true;
+  }
+
+  void markFirstLaunchCompleted() {
+    _firstLaunchCompleted = true;
   }
 
   void markChecked() {
@@ -472,6 +479,7 @@ class StateService {
       }
 
       _restorePointSuggested = data['restorePointSuggested'] == true;
+      _firstLaunchCompleted = data['firstLaunchCompleted'] == true;
 
       final lastCheck = data['lastCheckTime'];
 
@@ -495,6 +503,7 @@ class StateService {
           'startupBackups': _startupBackups,
           'devBackups': _devBackups,
           'restorePointSuggested': _restorePointSuggested,
+          'firstLaunchCompleted': _firstLaunchCompleted,
           'lastCheckTime': _lastCheckTime?.toIso8601String(),
         }),
         flush: true,

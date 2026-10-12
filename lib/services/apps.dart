@@ -574,7 +574,8 @@ class DevService extends ChangeNotifier {
       id: 'vmp',
       displayName: 'Virtual Machine Platform',
       featureName: 'VirtualMachinePlatform',
-      warning: 'Требует перезагрузки. Нужен для WSL2 и некоторых гипервизоров.',
+      warning:
+          'Требует перезагрузки. Нужен для WSL2 и некоторых гипервизоров.',
     ),
     _ComponentDef(
       id: 'hyperv',
@@ -591,6 +592,10 @@ class DevService extends ChangeNotifier {
       r'SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System';
   static const String _taskMgrValue = 'DisableTaskMgr';
   static const String _regEditValue = 'DisableRegistryTools';
+  static const String _legalKey =
+      r'SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System';
+  static const String _legalCaptionValue = 'LegalNoticeCaption';
+  static const String _legalTextValue = 'LegalNoticeText';
 
   List<WindowsComponentState> components = [];
   List<PathEntry> userPath = [];
@@ -619,6 +624,11 @@ class DevService extends ChangeNotifier {
   bool regEditMachineEnabled = true;
   String regEditMachineError = '';
 
+  bool legalChecked = false;
+  String legalCaption = '';
+  String legalText = '';
+  String legalError = '';
+
   DevService({
     required this.shell,
     required this.log,
@@ -633,6 +643,7 @@ class DevService extends ChangeNotifier {
     await refreshPaths();
     await refreshDevMode();
     await refreshPolicies();
+    await refreshLegalNotice();
 
     loaded = true;
     notifyListeners();
@@ -746,7 +757,8 @@ class DevService extends ChangeNotifier {
     notifyListeners();
 
     try {
-      final def = _componentDefs.firstWhere((d) => d.featureName == featureName);
+      final def =
+          _componentDefs.firstWhere((d) => d.featureName == featureName);
 
       final current = components.firstWhere(
         (c) => c.featureName == featureName,
@@ -1104,18 +1116,10 @@ class DevService extends ChangeNotifier {
     }
   }
 
-  String _policyKey(Hive hive) {
-    if (hive == Hive.hklm) {
-      return _policyKeyMachine;
-    }
-
-    return _policyKeyUser;
-  }
-
   RegistryOp _policyReadOp(Hive hive, String valueName) {
     return RegistryOp(
       hive: hive,
-      key: _policyKey(hive),
+      key: hive == Hive.hklm ? _policyKeyMachine : _policyKeyUser,
       valueName: valueName,
       type: RegValueType.dword,
       applyValue: null,
@@ -1127,7 +1131,7 @@ class DevService extends ChangeNotifier {
   RegistryOp _policyDisableOp(Hive hive, String valueName) {
     return RegistryOp(
       hive: hive,
-      key: _policyKey(hive),
+      key: hive == Hive.hklm ? _policyKeyMachine : _policyKeyUser,
       valueName: valueName,
       type: RegValueType.dword,
       applyValue: 1,
@@ -1139,7 +1143,7 @@ class DevService extends ChangeNotifier {
   RegistryOp _policyEnableOp(Hive hive, String valueName) {
     return RegistryOp(
       hive: hive,
-      key: _policyKey(hive),
+      key: hive == Hive.hklm ? _policyKeyMachine : _policyKeyUser,
       valueName: valueName,
       type: RegValueType.dword,
       applyValue: null,
@@ -1151,7 +1155,7 @@ class DevService extends ChangeNotifier {
   RegistryOp _policyWriteOp(Hive hive, String valueName, Object? value) {
     return RegistryOp(
       hive: hive,
-      key: _policyKey(hive),
+      key: hive == Hive.hklm ? _policyKeyMachine : _policyKeyUser,
       valueName: valueName,
       type: RegValueType.dword,
       applyValue: value,
@@ -1193,8 +1197,7 @@ class DevService extends ChangeNotifier {
 
   Future<void> _refreshTaskMgrUser() async {
     try {
-      taskMgrUserEnabled =
-          await _readPolicyEnabled(Hive.hkcu, _taskMgrValue);
+      taskMgrUserEnabled = await _readPolicyEnabled(Hive.hkcu, _taskMgrValue);
       taskMgrUserChecked = true;
       taskMgrUserError = '';
     } catch (e) {
@@ -1231,8 +1234,7 @@ class DevService extends ChangeNotifier {
 
   Future<void> _refreshRegEditUser() async {
     try {
-      regEditUserEnabled =
-          await _readPolicyEnabled(Hive.hkcu, _regEditValue);
+      regEditUserEnabled = await _readPolicyEnabled(Hive.hkcu, _regEditValue);
       regEditUserChecked = true;
       regEditUserError = '';
     } catch (e) {
@@ -1346,6 +1348,142 @@ class DevService extends ChangeNotifier {
     await refreshAfter();
   }
 
+  RegistryOp _legalCaptionOp() {
+    return RegistryOp(
+      hive: Hive.hklm,
+      key: _legalKey,
+      valueName: _legalCaptionValue,
+      type: RegValueType.string,
+      applyValue: null,
+      applyAction: RegAction.setValue,
+      revertAction: RegAction.deleteValue,
+    );
+  }
+
+  RegistryOp _legalTextOp() {
+    return RegistryOp(
+      hive: Hive.hklm,
+      key: _legalKey,
+      valueName: _legalTextValue,
+      type: RegValueType.string,
+      applyValue: null,
+      applyAction: RegAction.setValue,
+      revertAction: RegAction.deleteValue,
+    );
+  }
+
+  Future<void> refreshLegalNotice() async {
+    if (!system.isAdmin) {
+      legalChecked = false;
+      legalCaption = '';
+      legalText = '';
+      legalError = 'Нужны права администратора';
+      notifyListeners();
+      return;
+    }
+
+    try {
+      final reads = await registry.readMany([
+        _legalCaptionOp(),
+        _legalTextOp(),
+      ]);
+
+      legalCaption =
+          reads[0].missing || reads[0].isNull ? '' : reads[0].value;
+      legalText = reads[1].missing || reads[1].isNull ? '' : reads[1].value;
+      legalChecked = true;
+      legalError = '';
+    } catch (e) {
+      legalChecked = true;
+      legalError = e.toString();
+    }
+
+    notifyListeners();
+  }
+
+  Future<void> setLegalNotice(String caption, String text) async {
+    if (busy) {
+      return;
+    }
+
+    if (!system.isAdmin) {
+      throw 'Для текста экрана блокировки нужны права администратора';
+    }
+
+    busy = true;
+    error = '';
+    notifyListeners();
+
+    try {
+      final reads = await registry.readMany([
+        _legalCaptionOp(),
+        _legalTextOp(),
+      ]);
+
+      _backupDev(
+        'legal.caption',
+        reads[0].missing
+            ? '__MISSING__'
+            : (reads[0].isNull ? '__NULL__' : reads[0].value),
+      );
+      _backupDev(
+        'legal.text',
+        reads[1].missing
+            ? '__MISSING__'
+            : (reads[1].isNull ? '__NULL__' : reads[1].value),
+      );
+
+      await registry.write(_legalCaptionOp(), caption);
+      await registry.write(_legalTextOp(), text);
+
+      log.success(
+        'Текст экрана блокировки обновлен',
+        'LegalNoticeCaption / LegalNoticeText',
+      );
+
+      await refreshLegalNotice();
+      await state.save();
+    } catch (e) {
+      error = e.toString();
+      log.error('Ошибка текста экрана блокировки', error);
+      rethrow;
+    } finally {
+      busy = false;
+      notifyListeners();
+    }
+  }
+
+  Future<void> clearLegalNotice() async {
+    if (busy) {
+      return;
+    }
+
+    if (!system.isAdmin) {
+      throw 'Для текста экрана блокировки нужны права администратора';
+    }
+
+    busy = true;
+    error = '';
+    notifyListeners();
+
+    try {
+      await registry.deleteValue(_legalCaptionOp());
+      await registry.deleteValue(_legalTextOp());
+
+      log.success('Текст экрана блокировки удален');
+
+      await refreshLegalNotice();
+      await state.save();
+    } catch (e) {
+      error = e.toString();
+      log.error('Ошибка удаления текста экрана блокировки', error);
+      rethrow;
+    } finally {
+      busy = false;
+      notifyListeners();
+    }
+  }
+
   void _backupDev(String key, Object? value) {
     if (state.getDevBackup(key) == null) {
       state.setDevBackup(key, value);
@@ -1399,6 +1537,35 @@ class DevService extends ChangeNotifier {
         }
 
         ok++;
+      }
+
+      final legalCaptionBackup = state.getDevBackup('legal.caption');
+      final legalTextBackup = state.getDevBackup('legal.text');
+
+      if (legalCaptionBackup != null &&
+          legalTextBackup != null &&
+          system.isAdmin) {
+        try {
+          if (legalCaptionBackup == '__MISSING__') {
+            await registry.deleteValue(_legalCaptionOp());
+          } else {
+            await registry.write(_legalCaptionOp(), legalCaptionBackup);
+          }
+
+          if (legalTextBackup == '__MISSING__') {
+            await registry.deleteValue(_legalTextOp());
+          } else {
+            await registry.write(_legalTextOp(), legalTextBackup);
+          }
+
+          state.removeDevBackup('legal.caption');
+          state.removeDevBackup('legal.text');
+          await state.save();
+          await refreshLegalNotice();
+          ok++;
+        } catch (_) {
+          failed++;
+        }
       }
 
       final taskMgrUserBackup = state.getDevBackup('policy.taskmgr.user');
