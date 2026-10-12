@@ -1963,7 +1963,7 @@ class _SettingsPageState extends State<SettingsPage> {
                   const SizedBox(height: 12),
                   const InfoRow(
                     label: 'Версия',
-                    value: '0.3.0',
+                    value: '0.4.0',
                   ),
                   const SizedBox(height: 12),
                   InfoRow(

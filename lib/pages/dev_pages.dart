@@ -26,6 +26,8 @@ class _NetworkPageState extends State<NetworkPage> {
   final TextEditingController _secondaryController = TextEditingController();
   final TextEditingController _gatewayController = TextEditingController();
 
+  String _prefilledAlias = '';
+
   @override
   void initState() {
     super.initState();
@@ -36,6 +38,8 @@ class _NetworkPageState extends State<NetworkPage> {
       widget.services.log,
     ]);
 
+    widget.services.network.addListener(_onNetworkChanged);
+
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (widget.services.network.adapters.isEmpty) {
         widget.services.network.refreshAdapters();
@@ -45,10 +49,41 @@ class _NetworkPageState extends State<NetworkPage> {
 
   @override
   void dispose() {
+    widget.services.network.removeListener(_onNetworkChanged);
     _primaryController.dispose();
     _secondaryController.dispose();
     _gatewayController.dispose();
     super.dispose();
+  }
+
+  void _onNetworkChanged() {
+    final network = widget.services.network;
+    final alias = network.selectedAlias;
+
+    if (alias.isEmpty || alias == _prefilledAlias) {
+      return;
+    }
+
+    _prefilledAlias = alias;
+
+    NetworkAdapterInfo? adapter;
+
+    for (final item in network.adapters) {
+      if (item.alias == alias) {
+        adapter = item;
+      }
+    }
+
+    if (adapter == null) {
+      return;
+    }
+
+    _primaryController.text =
+        adapter.dnsServers.isNotEmpty ? adapter.dnsServers[0] : '';
+    _secondaryController.text =
+        adapter.dnsServers.length > 1 ? adapter.dnsServers[1] : '';
+    _gatewayController.text =
+        adapter.gateways.isNotEmpty ? adapter.gateways[0] : '';
   }
 
   Future<void> _applyDns(String primary, String secondary) async {
@@ -296,6 +331,13 @@ class _NetworkPageState extends State<NetworkPage> {
                     'Ручная настройка',
                     style: theme.textTheme.titleLarge,
                   ),
+                  const SizedBox(height: 12),
+                  Text(
+                    'Поля автоматически заполняются текущими значениями выбранного адаптера.',
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: scheme.onSurfaceVariant,
+                    ),
+                  ),
                   const SizedBox(height: 16),
                   TextField(
                     controller: _primaryController,
@@ -360,7 +402,8 @@ class _NetworkPageState extends State<NetworkPage> {
                   ),
                   const SizedBox(height: 16),
                   if (network.lastMessage.isNotEmpty)
-                    InfoRow(label: 'Последний вывод', value: network.lastMessage),
+                    InfoRow(
+                        label: 'Последний вывод', value: network.lastMessage),
                   const SizedBox(height: 16),
                   Wrap(
                     spacing: 12,
@@ -413,6 +456,12 @@ class DevPage extends StatefulWidget {
 class _DevPageState extends State<DevPage> {
   late final Listenable _listenable;
 
+  final TextEditingController _legalCaptionController =
+      TextEditingController();
+  final TextEditingController _legalTextController = TextEditingController();
+
+  bool _legalPrefilled = false;
+
   @override
   void initState() {
     super.initState();
@@ -424,6 +473,8 @@ class _DevPageState extends State<DevPage> {
       widget.services.log,
     ]);
 
+    widget.services.dev.addListener(_onDevChanged);
+
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!widget.services.dev.loaded) {
         widget.services.dev.refreshAll();
@@ -433,6 +484,68 @@ class _DevPageState extends State<DevPage> {
         widget.services.startup.loadExtended();
       }
     });
+  }
+
+  @override
+  void dispose() {
+    widget.services.dev.removeListener(_onDevChanged);
+    _legalCaptionController.dispose();
+    _legalTextController.dispose();
+    super.dispose();
+  }
+
+  void _onDevChanged() {
+    final dev = widget.services.dev;
+
+    if (_legalPrefilled || !dev.legalChecked) {
+      return;
+    }
+
+    _legalPrefilled = true;
+    _legalCaptionController.text = dev.legalCaption;
+    _legalTextController.text = dev.legalText;
+  }
+
+  String _policyStatusLabel({
+    required bool checked,
+    required String error,
+    required bool enabled,
+  }) {
+    if (error == 'Нужны права администратора') {
+      return 'Нужен админ';
+    }
+
+    if (error.isNotEmpty) {
+      return 'Ошибка';
+    }
+
+    if (!checked) {
+      return 'Не проверено';
+    }
+
+    return enabled ? 'Включен' : 'Отключен';
+  }
+
+  Color _policyStatusColor({
+    required bool checked,
+    required String error,
+    required bool enabled,
+  }) {
+    final scheme = Theme.of(context).colorScheme;
+
+    if (error == 'Нужны права администратора') {
+      return scheme.tertiary;
+    }
+
+    if (error.isNotEmpty) {
+      return scheme.error;
+    }
+
+    if (!checked) {
+      return scheme.onSurfaceVariant;
+    }
+
+    return enabled ? scheme.primary : scheme.error;
   }
 
   Future<void> _toggleComponent(
@@ -521,6 +634,146 @@ class _DevPageState extends State<DevPage> {
     }
   }
 
+  Future<void> _changeTaskManager(
+    BuildContext context,
+    bool enable,
+    bool machine,
+  ) async {
+    final services = widget.services;
+
+    if (machine && !services.system.isAdmin) {
+      await ensureAdminGeneric(
+        context,
+        services,
+        'Диспетчер задач (вся система)',
+      );
+      return;
+    }
+
+    if (!enable) {
+      final confirmed = await confirmDialog(
+        context,
+        title: 'Отключение Диспетчера задач',
+        message:
+            'Диспетчер задач будет отключен для ${machine ? 'всей системы' : 'текущего пользователя'}. Это может помешать завершению процессов и диагностике. Продолжить?',
+        confirmLabel: 'Отключить',
+        danger: true,
+      );
+
+      if (!confirmed) {
+        return;
+      }
+    }
+
+    try {
+      await services.dev.setTaskManager(enable: enable, machine: machine);
+      showSnack(
+        context,
+        enable ? 'Диспетчер задач включен' : 'Диспетчер задач отключен',
+      );
+    } catch (e) {
+      showSnack(context, e.toString());
+    }
+  }
+
+  Future<void> _changeRegistryEditor(
+    BuildContext context,
+    bool enable,
+    bool machine,
+  ) async {
+    final services = widget.services;
+
+    if (machine && !services.system.isAdmin) {
+      await ensureAdminGeneric(
+        context,
+        services,
+        'Редактор реестра (вся система)',
+      );
+      return;
+    }
+
+    if (!enable) {
+      final confirmed = await confirmDialog(
+        context,
+        title: 'Отключение Редактора реестра',
+        message:
+            'Редактор реестра будет отключен для ${machine ? 'всей системы' : 'текущего пользователя'}. Это может помешать ручной правке реестра. Продолжить?',
+        confirmLabel: 'Отключить',
+        danger: true,
+      );
+
+      if (!confirmed) {
+        return;
+      }
+    }
+
+    try {
+      await services.dev.setRegistryEditor(enable: enable, machine: machine);
+      showSnack(
+        context,
+        enable ? 'Редактор реестра включен' : 'Редактор реестра отключен',
+      );
+    } catch (e) {
+      showSnack(context, e.toString());
+    }
+  }
+
+  Future<void> _applyLegal(BuildContext context) async {
+    final services = widget.services;
+
+    if (!await ensureAdminGeneric(
+      context,
+      services,
+      'Текст экрана блокировки',
+    )) {
+      return;
+    }
+
+    try {
+      await services.dev.setLegalNotice(
+        _legalCaptionController.text.trim(),
+        _legalTextController.text.trim(),
+      );
+      showSnack(context, 'Текст экрана блокировки применен');
+    } catch (e) {
+      showSnack(context, e.toString());
+    }
+  }
+
+  Future<void> _clearLegal(BuildContext context) async {
+    final services = widget.services;
+
+    if (!await ensureAdminGeneric(
+      context,
+      services,
+      'Текст экрана блокировки',
+    )) {
+      return;
+    }
+
+    final confirmed = await confirmDialog(
+      context,
+      title: 'Удаление текста экрана блокировки',
+      message:
+          'Собственный текст и заголовок будут удалены с экрана блокировки. Продолжить?',
+      confirmLabel: 'Удалить',
+      danger: true,
+    );
+
+    if (!confirmed) {
+      return;
+    }
+
+    try {
+      await services.dev.clearLegalNotice();
+      _legalCaptionController.clear();
+      _legalTextController.clear();
+      showSnack(context, 'Текст экрана блокировки удален');
+    } catch (e) {
+      showSnack(context, e.toString());
+    }
+  }
+
   Future<void> _addPath(BuildContext context, String target) async {
     final services = widget.services;
     final controller = TextEditingController();
@@ -551,7 +804,9 @@ class _DevPageState extends State<DevPage> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
-                target == 'Machine' ? 'Системный PATH' : 'Пользовательский PATH',
+                target == 'Machine'
+                    ? 'Системный PATH'
+                    : 'Пользовательский PATH',
                 style: theme.textTheme.bodyMedium?.copyWith(
                   color: theme.colorScheme.onSurfaceVariant,
                 ),
@@ -599,7 +854,11 @@ class _DevPageState extends State<DevPage> {
     }
   }
 
-  Future<void> _removePath(BuildContext context, String target, int index) async {
+  Future<void> _removePath(
+    BuildContext context,
+    String target,
+    int index,
+  ) async {
     final services = widget.services;
     final list = target == 'Machine'
         ? services.dev.systemPath
@@ -635,7 +894,12 @@ class _DevPageState extends State<DevPage> {
     }
   }
 
-  Future<void> _movePath(BuildContext context, String target, int index, int delta) async {
+  Future<void> _movePath(
+    BuildContext context,
+    String target,
+    int index,
+    int delta,
+  ) async {
     final services = widget.services;
 
     if (target == 'Machine' &&
@@ -690,7 +954,7 @@ class _DevPageState extends State<DevPage> {
       context,
       title: 'Откат Dev изменений',
       message:
-          'VeTweek вернет только те Dev-изменения, по которым сохранил резервные копии: PATH, Developer Mode, компоненты и автозагрузку. Продолжить?',
+          'VeTweek вернет только те Dev-изменения, по которым сохранил резервные копии: PATH, Developer Mode, компоненты, системные инструменты, текст экрана блокировки и автозагрузку. Продолжить?',
       confirmLabel: 'Откатить',
       danger: true,
     );
@@ -825,6 +1089,223 @@ class _DevPageState extends State<DevPage> {
     );
   }
 
+  Widget _buildPolicyCard({
+    required String title,
+    required String scope,
+    required bool checked,
+    required bool enabled,
+    required String error,
+    required bool machine,
+    required Future<void> Function(bool) onChange,
+  }) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final services = widget.services;
+    final busy = services.dev.busy || services.dev.policyBusy;
+    final needsAdminAction = machine && !services.system.isAdmin;
+    final canChangeBase = !busy && (checked || needsAdminAction);
+    final label = _policyStatusLabel(
+      checked: checked,
+      error: error,
+      enabled: enabled,
+    );
+    final color = _policyStatusColor(
+      checked: checked,
+      error: error,
+      enabled: enabled,
+    );
+
+    return SectionCard(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      title,
+                      style: theme.textTheme.titleMedium?.copyWith(
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      scope,
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: scheme.onSurfaceVariant,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              StatusChip(
+                label: label,
+                color: color,
+              ),
+            ],
+          ),
+          if (error.isNotEmpty && error != 'Нужны права администратора') ...[
+            const SizedBox(height: 12),
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(
+                color: scheme.errorContainer,
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: SelectableText(
+                error,
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: scheme.onErrorContainer,
+                ),
+              ),
+            ),
+          ],
+          const SizedBox(height: 14),
+          Wrap(
+            spacing: 10,
+            runSpacing: 10,
+            children: [
+              FilledButton.icon(
+                onPressed: canChangeBase && !enabled
+                    ? () async {
+                        await onChange(true);
+                      }
+                    : null,
+                icon: const Icon(Icons.check, size: 16),
+                label: const Text('Включить'),
+              ),
+              OutlinedButton.icon(
+                onPressed: canChangeBase && enabled
+                    ? () async {
+                        await onChange(false);
+                      }
+                    : null,
+                icon: const Icon(Icons.close, size: 16),
+                label: const Text('Отключить'),
+              ),
+              TextButton.icon(
+                onPressed: busy
+                    ? null
+                    : () async {
+                        await services.dev.refreshPolicies();
+                      },
+                icon: const Icon(Icons.refresh, size: 16),
+                label: const Text('Обновить'),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildLegalCard() {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final services = widget.services;
+    final dev = services.dev;
+    final busy = dev.busy;
+
+    return SectionCard(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'Текст на экране блокировки',
+            style: theme.textTheme.titleLarge,
+          ),
+          const SizedBox(height: 12),
+          Text(
+            'Выводит собственный заголовок и текст над полем ввода пароля при включении ПК через LegalNoticeCaption и LegalNoticeText.',
+            style: theme.textTheme.bodyMedium?.copyWith(
+              color: scheme.onSurfaceVariant,
+            ),
+          ),
+          if (!services.system.isAdmin) ...[
+            const SizedBox(height: 12),
+            StatusChip(
+              label: 'Нужен админ',
+              color: scheme.tertiary,
+            ),
+          ],
+          if (dev.legalError.isNotEmpty &&
+              dev.legalError != 'Нужны права администратора') ...[
+            const SizedBox(height: 12),
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(
+                color: scheme.errorContainer,
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: SelectableText(
+                dev.legalError,
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: scheme.onErrorContainer,
+                ),
+              ),
+            ),
+          ],
+          const SizedBox(height: 16),
+          TextField(
+            controller: _legalCaptionController,
+            decoration: const InputDecoration(
+              labelText: 'Заголовок',
+              hintText: 'Например: Контакт при утере',
+            ),
+          ),
+          const SizedBox(height: 12),
+          TextField(
+            controller: _legalTextController,
+            maxLines: 3,
+            decoration: const InputDecoration(
+              labelText: 'Текст',
+              hintText: 'Имя, телефон, мотивирующая цитата',
+            ),
+          ),
+          const SizedBox(height: 16),
+          Wrap(
+            spacing: 12,
+            runSpacing: 12,
+            children: [
+              FilledButton.icon(
+                onPressed: busy
+                    ? null
+                    : () {
+                        _applyLegal(context);
+                      },
+                icon: const Icon(Icons.check),
+                label: const Text('Применить текст'),
+              ),
+              OutlinedButton.icon(
+                onPressed: busy
+                    ? null
+                    : () {
+                        _clearLegal(context);
+                      },
+                icon: const Icon(Icons.delete_outline),
+                label: const Text('Убрать текст'),
+              ),
+              TextButton.icon(
+                onPressed: busy
+                    ? null
+                    : () async {
+                        await dev.refreshLegalNotice();
+                      },
+                icon: const Icon(Icons.refresh),
+                label: const Text('Обновить'),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final services = widget.services;
@@ -840,9 +1321,61 @@ class _DevPageState extends State<DevPage> {
           children: [
             const PageHeader(
               title: 'Dev',
-              subtitle: 'Компоненты Windows, Developer Mode, PATH и расширенная автозагрузка',
+              subtitle:
+                  'Системные инструменты, компоненты Windows, Developer Mode, PATH и расширенная автозагрузка',
             ),
-            if (dev.busy)
+            Text(
+              'Системные инструменты',
+              style: theme.textTheme.titleLarge,
+            ),
+            const SizedBox(height: 16),
+            _buildPolicyCard(
+              title: 'Диспетчер задач',
+              scope: 'Текущий пользователь',
+              checked: dev.taskMgrUserChecked,
+              enabled: dev.taskMgrUserEnabled,
+              error: dev.taskMgrUserError,
+              machine: false,
+              onChange: (enable) =>
+                  _changeTaskManager(context, enable, false),
+            ),
+            const SizedBox(height: 16),
+            _buildPolicyCard(
+              title: 'Диспетчер задач',
+              scope: 'Вся система',
+              checked: dev.taskMgrMachineChecked,
+              enabled: dev.taskMgrMachineEnabled,
+              error: dev.taskMgrMachineError,
+              machine: true,
+              onChange: (enable) =>
+                  _changeTaskManager(context, enable, true),
+            ),
+            const SizedBox(height: 16),
+            _buildPolicyCard(
+              title: 'Редактор реестра',
+              scope: 'Текущий пользователь',
+              checked: dev.regEditUserChecked,
+              enabled: dev.regEditUserEnabled,
+              error: dev.regEditUserError,
+              machine: false,
+              onChange: (enable) =>
+                  _changeRegistryEditor(context, enable, false),
+            ),
+            const SizedBox(height: 16),
+            _buildPolicyCard(
+              title: 'Редактор реестра',
+              scope: 'Вся система',
+              checked: dev.regEditMachineChecked,
+              enabled: dev.regEditMachineEnabled,
+              error: dev.regEditMachineError,
+              machine: true,
+              onChange: (enable) =>
+                  _changeRegistryEditor(context, enable, true),
+            ),
+            const SizedBox(height: 16),
+            _buildLegalCard(),
+            const SizedBox(height: 16),
+            if (dev.busy || dev.policyBusy)
               const LinearProgressIndicator(),
             if (dev.error.isNotEmpty) ...[
               const SizedBox(height: 16),
@@ -856,7 +1389,7 @@ class _DevPageState extends State<DevPage> {
               runSpacing: 12,
               children: [
                 FilledButton.icon(
-                  onPressed: dev.busy
+                  onPressed: dev.busy || dev.policyBusy
                       ? null
                       : () async {
                           await dev.refreshAll();
@@ -866,7 +1399,7 @@ class _DevPageState extends State<DevPage> {
                   label: const Text('Обновить Dev'),
                 ),
                 OutlinedButton.icon(
-                  onPressed: dev.busy
+                  onPressed: dev.busy || dev.policyBusy
                       ? null
                       : () {
                           _rollbackDev(context);
@@ -958,14 +1491,17 @@ class _DevPageState extends State<DevPage> {
                     value: dev.devModeEnabled ? 'Включен' : 'Отключен',
                   ),
                   const SizedBox(height: 16),
-                  SwitchListTile(
-                    title: const Text('Developer Mode'),
-                    value: dev.devModeEnabled,
-                    onChanged: dev.busy
-                        ? null
-                        : (value) {
-                            _setDevMode(context, value);
-                          },
+                  MouseRegion(
+                    cursor: SystemMouseCursors.click,
+                    child: SwitchListTile(
+                      title: const Text('Developer Mode'),
+                      value: dev.devModeEnabled,
+                      onChanged: dev.busy
+                          ? null
+                          : (value) {
+                              _setDevMode(context, value);
+                            },
+                    ),
                   ),
                   const SizedBox(height: 12),
                   Wrap(
@@ -1008,7 +1544,8 @@ class _DevPageState extends State<DevPage> {
                   ),
                   const SizedBox(height: 16),
                   WarningBanner(
-                    text: 'Userinit, Shell и RunOnce могут быть критичны для входа в систему. Удаляйте только если точно знаете, что делаете.',
+                    text:
+                        'Userinit, Shell и RunOnce могут быть критичны для входа в систему. Удаляйте только если точно знаете, что делаете.',
                   ),
                   const SizedBox(height: 16),
                   Wrap(

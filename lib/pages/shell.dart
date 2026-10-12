@@ -90,6 +90,144 @@ Future<bool> confirmDialog(
   return result == true;
 }
 
+Future<void> showWelcomeDialog(BuildContext context) async {
+  final theme = Theme.of(context);
+  final scheme = theme.colorScheme;
+
+  await showDialog<void>(
+    context: context,
+    barrierDismissible: false,
+    builder: (dialogContext) {
+      return Dialog(
+        backgroundColor: theme.colorScheme.surface,
+        elevation: 0,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(16),
+        ),
+        child: SizedBox(
+          width: 520,
+          child: Padding(
+            padding: const EdgeInsets.all(28),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Image.asset(
+                      'logo.png',
+                      width: 40,
+                      height: 40,
+                      fit: BoxFit.contain,
+                      errorBuilder: (context, error, stackTrace) {
+                        return Icon(
+                          Icons.tune,
+                          size: 32,
+                          color: scheme.primary,
+                        );
+                      },
+                    ),
+                    const SizedBox(width: 16),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'Добро пожаловать в VeTweek',
+                            style: theme.textTheme.titleLarge?.copyWith(
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                          const SizedBox(height: 2),
+                          Text(
+                            'Версия 0.4.0',
+                            style: theme.textTheme.bodySmall?.copyWith(
+                              color: scheme.onSurfaceVariant,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 20),
+                Text(
+                  'VeTweek — инструмент для настройки и оптимизации Windows: приватность, телеметрия, очистка системы, производительность, сеть и инструменты разработчика.',
+                  style: theme.textTheme.bodyMedium,
+                ),
+                const SizedBox(height: 16),
+                _WelcomePoint(
+                  icon: Icons.restore,
+                  text:
+                      'Перед применением твиков рекомендуется создать точку восстановления Windows. Программа сама предложит её создать перед первым твиком.',
+                ),
+                const SizedBox(height: 10),
+                _WelcomePoint(
+                  icon: Icons.admin_panel_settings_outlined,
+                  text:
+                      'Для системных твиков требуются права администратора. Программа попросит перезапуск от администратора при необходимости.',
+                ),
+                const SizedBox(height: 10),
+                _WelcomePoint(
+                  icon: Icons.warning_amber_rounded,
+                  text:
+                      'Приложение создано с помощью искусственного интеллекта. Все действия выполняются под вашу полную ответственность. Создатели не несут ответственности за последствия.',
+                ),
+                const SizedBox(height: 24),
+                Align(
+                  alignment: Alignment.centerRight,
+                  child: FilledButton(
+                    onPressed: () {
+                      Navigator.of(dialogContext).pop();
+                    },
+                    child: const Text('Понять и продолжить'),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+    },
+  );
+}
+
+class _WelcomePoint extends StatelessWidget {
+  final IconData icon;
+  final String text;
+
+  const _WelcomePoint({
+    required this.icon,
+    required this.text,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Icon(
+          icon,
+          size: 18,
+          color: scheme.primary,
+        ),
+        const SizedBox(width: 10),
+        Expanded(
+          child: Text(
+            text,
+            style: theme.textTheme.bodyMedium?.copyWith(
+              color: scheme.onSurfaceVariant,
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
 Future<bool> ensureAdminGeneric(
   BuildContext context,
   AppServices services,
@@ -268,6 +406,21 @@ class _AppShellState extends State<AppShell> with WindowListener {
     });
 
     _searchController.addListener(_onSearch);
+
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      if (!mounted) {
+        return;
+      }
+
+      if (widget.services.state.firstLaunchCompleted) {
+        return;
+      }
+
+      await showWelcomeDialog(context);
+
+      widget.services.state.markFirstLaunchCompleted();
+      await widget.services.state.save();
+    });
   }
 
   @override
